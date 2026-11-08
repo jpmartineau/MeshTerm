@@ -179,3 +179,116 @@ def test_the_route_row_follows_the_routes_on_the_node_page() -> None:
     newer = _Action("device_route", "🧭", "", "Device route · 1 hop, set by you…")
     screen.replace_routes(view, route_action=newer, trace_action=trace)
     assert screen._focusables()[screen._row_index][1] is newer
+
+
+# -- Trace target ----------------------------------------------------------------------
+
+
+def _row(hops: tuple[str, ...] | None, opened: list | None = None):  # noqa: ANN202
+    """A RouteRow over a route service that reports ``hops``, and records each open."""
+    from meshterm.ui.device_route_screen import RouteRow
+
+    routes = SimpleNamespace(
+        status=lambda contact, device_key: RouteStatus(hops, ORIGIN_LEARNED),
+    )
+
+    class _Row(RouteRow):
+        async def open(self, proven):  # noqa: ANN001, ANN201
+            if opened is not None:
+                opened.append(proven)
+
+    return _Row(
+        SimpleNamespace(routes=routes),
+        Contact(name="Alice", public_key=ALICE_KEY),
+        device_key="",
+        build_env=lambda contact: _env(),
+    )
+
+
+def test_the_trace_row_lights_only_for_a_route_that_is_a_change() -> None:
+    """A traced route that the radio lacks is offered. The same route says so, quietly."""
+    from meshterm.ui.device_route_screen import ProvenRoute
+
+    proven = ProvenRoute(hops=("27d4",), home=4, sent=5, worst_snr=2.5)
+    assert proven.evidence() == "came home 4 of 5 · worst +2.5 dB"
+    text, lit = _row(("3d",)).text(proven)
+    assert lit
+    assert text == "Use this route for DMs and admin — 4/5 came home…"
+    text, lit = _row(("27",)).text(proven)
+    assert not lit
+    assert text == "Device route — 1 hop, learned · same as the trace…"
+    text, lit = _row(None).text(None)
+    assert (text, lit) == ("Device route — none, it floods…", False)
+    failed = ProvenRoute(hops=("27d4",), home=0, sent=2)
+    assert not _row(("3d",)).text(failed)[1]
+
+
+def test_the_popup_offers_the_traced_route_first() -> None:
+    """Use the traced route, then Use and keep it (with a site), then the usual rows."""
+    from meshterm.ui.device_route_screen import ProvenRoute
+
+    proven = ProvenRoute(hops=("27d4",), home=3, sent=3)
+    learned = RouteStatus(("3d",), ORIGIN_LEARNED, owner=HOME)
+    assert _values(_action_rows(learned, proven)) == [
+        "traced",
+        "traced+keep",
+        "set",
+        "keep",
+        "forget",
+        "discover",
+    ]
+    same = RouteStatus(("27",), ORIGIN_LEARNED, owner=HOME)
+    assert _values(_action_rows(same, proven))[0] == "set"
+
+
+async def test_trace_target_has_the_row_and_hands_it_the_traced_route() -> None:
+    """The row follows Explore paths, turns green after a trace home, and opens with it."""
+    import asyncio
+
+    from meshterm.ui.device_route_screen import ProvenRoute
+    from meshterm.ui.trace_screen import TraceScreen
+    from tests.conftest import plain
+    from tests.test_live_screens import _FakeSession, _trace
+
+    opened: list = []
+    session = _FakeSession()
+
+    async def flow(current):  # noqa: ANN001, ANN202
+        return current
+
+    async def trace(spec, on_trace):  # noqa: ANN001, ANN202
+        on_trace(_trace(5.0, 2.0))
+
+    def prove(traces: list) -> ProvenRoute | None:
+        home = [t for t in traces if t.success]
+        return ProvenRoute(("27d4",), len(home), len(traces), 2.0) if home else None
+
+    screen = TraceScreen(
+        "Alice",
+        device_label="Us",
+        device_hash="aabb" + "00" * 30,
+        resolve=lambda label: label,
+        session=session,
+        trace=trace,
+        compose_path=flow,
+        explore=flow,
+        pick_width=flow,
+        pick_samples=flow,
+        width_bytes=lambda: 1,
+        sample_count=lambda: 1,
+        pace_s=0.0,
+        route_row=_row(("3d",), opened),
+        prove=prove,
+    )
+    screen.note_viewport(40)
+    assert screen._actions == ("compose", "explore", "route", "width", "samples", "trace")
+    before = "\n".join(plain(line) for line in screen.render_body(72))
+    assert "Device route — 1 hop, learned…" in before
+    screen._on_trace(_trace(5.0, 2.0))
+    after = "\n".join(plain(line) for line in screen.render_body(72))
+    assert "Use this route for DMs and admin — 1/1 came home…" in after
+    screen._index = screen._actions.index("route")
+    screen.handle("enter")
+    await asyncio.sleep(0)
+    assert opened == [ProvenRoute(("27d4",), 1, 1, 2.0)]
+    assert len(screen._traces) == 1  # the popup changes no path of the screen

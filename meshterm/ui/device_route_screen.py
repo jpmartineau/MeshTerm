@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Device route popup of the node page: see, set, keep, forget, and discover the route.
+"""The Device route popup: see, set, keep, forget, and discover the radio's route to a contact.
 
 The radio holds one *device route* for each contact: the relays that it sends to the
 contact through (refer to :mod:`meshterm.services.device_routes`). The Routes tab of the
@@ -22,6 +22,11 @@ Enter on the row opens this popup. Its first page shows the route and how the ra
 
 The popup asks and then closes (a popup is not a place). The node page then shows the new
 state on its row.
+
+Trace target has the same row (:class:`RouteRow`). A trace that came home walked its route
+out and back, which is the best proof that MeshTerm can have for a route. Thus, after such
+a trace, the row offers the route that the trace walked (a :class:`ProvenRoute`), and the
+popup gets two rows before the others: **Use the traced route** and **Use and keep it**.
 """
 
 from __future__ import annotations
@@ -63,6 +68,8 @@ _FORGET = "forget"
 _DISCOVER = "discover"
 _NEED_SITE = "site"
 _COMPOSE = "compose"
+_USE_TRACED = "traced"
+_KEEP_TRACED = "traced+keep"
 #: How many heard routes the picker lists after the suggested route.
 _PICKER_ROUTES = 6
 
@@ -130,6 +137,31 @@ class RouteEnv:
         return tuple(self.topology.canonical(hop) or hop for hop in hops)
 
 
+@dataclass(frozen=True, slots=True)
+class ProvenRoute:
+    """A route out to a contact that traces walked, and on which they came home.
+
+    Attributes:
+        hops: The relays from our node to the contact, as canonical ids. Empty means no
+            relay.
+        home: How many traces came home on the route.
+        sent: How many traces went out on it.
+        worst_snr: The median bottleneck SNR (dB) of the traces that came home, if known.
+    """
+
+    hops: tuple[str, ...]
+    home: int
+    sent: int
+    worst_snr: float | None = None
+
+    def evidence(self) -> str:
+        """The proof in words: ``came home 5 of 5 · worst +3.5 dB``."""
+        text = f"came home {self.home} of {self.sent}"
+        if self.worst_snr is not None:
+            text += f" · worst {self.worst_snr:+.1f} dB"
+        return text
+
+
 def _hops_text(hops: tuple[str, ...]) -> str:
     count = len(hops)
     if count == 0:
@@ -137,8 +169,15 @@ def _hops_text(hops: tuple[str, ...]) -> str:
     return "1 hop" if count == 1 else f"{count} hops"
 
 
-def row_label(status: RouteStatus) -> str:
-    """The label of the row on the node page: the route that the radio holds, in short."""
+def row_label(status: RouteStatus, *, sep: str = " · ") -> str:
+    """The label of the row: the route that the radio holds, in short.
+
+    Args:
+        status: The device route now.
+        sep: The text between the name of the row and its value. The node page uses a
+            middle dot. The action list of Trace target uses a dash, because each of its
+            rows has that shape.
+    """
     if status.hops is None:
         now = "none, it floods"
     elif status.origin == ORIGIN_KEPT and status.owner is not None:
@@ -149,7 +188,7 @@ def row_label(status: RouteStatus) -> str:
         now = f"{_hops_text(status.hops)}, learned"
     if status.skipped_since is not None:
         now += " · kept route skipped"
-    return f"Device route · {now}…"
+    return f"Device route{sep}{now}…"
 
 
 def _where(status: RouteStatus) -> str:
@@ -181,8 +220,14 @@ def _route_note(line: Text) -> Separator:
     return Separator(title)
 
 
-def _status_rows(env: RouteEnv, status: RouteStatus) -> list[Any]:
-    """The lines above the actions: the route now, how the radio got it, and the kept route."""
+def _status_rows(
+    env: RouteEnv, status: RouteStatus, proven: ProvenRoute | None = None
+) -> list[Any]:
+    """The lines above the actions: the route now and its origin, then any other route.
+
+    The other routes are the kept route (when the radio holds another one) and the route
+    that the traces walked (when it is a change).
+    """
     rows: list[Any] = []
     if status.hops is None:
         rows.append(_note("none — the radio floods, then learns a route"))
@@ -208,18 +253,40 @@ def _status_rows(env: RouteEnv, status: RouteStatus) -> list[Any]:
                     "warn",
                 )
             )
+    if _offers_traced(status, proven):
+        assert proven is not None
+        rows.append(_note(f"the trace {proven.evidence()} on:"))
+        rows.append(_route_note(env.line(proven.hops)))
     return rows
 
 
-def _action_rows(status: RouteStatus) -> list[Any]:
-    """The actions of the first page, for the state of the route."""
-    rows: list[tuple[str, str, str]] = [
+def _offers_traced(status: RouteStatus, proven: ProvenRoute | None) -> bool:
+    """Whether the traced route is a change: it came home, and the radio holds another."""
+    return proven is not None and proven.home > 0 and not same_route(status.hops, proven.hops)
+
+
+def _action_rows(status: RouteStatus, proven: ProvenRoute | None = None) -> list[Any]:
+    """The actions of the first page, for the state of the route and a traced route."""
+    rows: list[tuple[str, str, str]] = []
+    if _offers_traced(status, proven):
+        rows.append(
+            (
+                "Use the traced route",
+                "the kept route changes too" if status.kept is not None else "set it now",
+                _USE_TRACED,
+            )
+        )
+        if status.kept is None and status.owner is not None:
+            rows.append(
+                ("Use and keep it", f"write it back here at {_where(status)}", _KEEP_TRACED)
+            )
+    rows.append(
         (
             "Set the route…",
             "the kept route changes too" if status.kept is not None else "choose its relays",
             _SET,
         )
-    ]
+    )
     if status.kept is not None:
         rows.append(("Stop keeping it", "the radio keeps what it holds", _UNKEEP))
     elif status.hops is not None:
@@ -273,8 +340,16 @@ def _picker_rows(env: RouteEnv, status: RouteStatus) -> list[Any]:
     return rows
 
 
-async def open_device_route(ctx: AppContext, env: RouteEnv) -> bool:
+async def open_device_route(
+    ctx: AppContext, env: RouteEnv, *, proven: ProvenRoute | None = None
+) -> bool:
     """Run the Device route popup for one contact.
+
+    Args:
+        ctx: The shared application context.
+        env: What the popup needs from the page that opened it.
+        proven: The route that traces walked and came home on, from Trace target. When
+            it is not the radio's route, the popup offers it first.
 
     Returns:
         Whether the route or the kept route changed, so that the page shows it again.
@@ -288,8 +363,13 @@ async def open_device_route(ctx: AppContext, env: RouteEnv) -> bool:
     title = f"Device route — {env.label}"
 
     def first(_values: list) -> WizardPage:
-        items = [*_status_rows(env, status), Separator(" "), *_action_rows(status)]
-        return WizardPage(title=title, items=items, default=_SET)
+        items = [
+            *_status_rows(env, status, proven),
+            Separator(" "),
+            *_action_rows(status, proven),
+        ]
+        default = _USE_TRACED if _offers_traced(status, proven) else _SET
+        return WizardPage(title=title, items=items, default=default)
 
     def second(values: list):  # type: ignore[no-untyped-def] - a page, or an awaitable
         if values[0] != _SET:
@@ -304,6 +384,10 @@ async def open_device_route(ctx: AppContext, env: RouteEnv) -> bool:
     if answers is None:
         return False
     action, picked = answers[0], answers[1]
+    if action in (_USE_TRACED, _KEEP_TRACED) and proven is not None:
+        if action == _KEEP_TRACED:
+            return await _guard(ctx, env, ctx.routes.keep(env.contact, proven.hops))
+        return await _apply(ctx, env, status, proven.hops)
     if action == _SET:
         if picked == _COMPOSE:
             hops = await _compose(ctx, env, status)
@@ -441,3 +525,70 @@ async def _discover(ctx: AppContext, env: RouteEnv, status: RouteStatus) -> bool
     if answer != "use":
         return False
     return await _apply(ctx, env, status, out)
+
+
+class RouteRow:
+    """The Device route row of Trace target, and the popup that it opens.
+
+    The trace screen reads :meth:`text` at each paint, so the row says what the radio
+    holds now. After a trace comes home on another route, the row offers that route
+    instead, and Enter opens the popup with it first.
+
+    Args:
+        ctx: The shared application context.
+        contact: The target, as the radio reported it.
+        device_key: The public key of the connected companion, or ``""``.
+        build_env: Builds what the popup needs, for the contact as it is now. It runs
+            when the popup opens, because it reads all the evidence.
+    """
+
+    def __init__(
+        self,
+        ctx: AppContext,
+        contact: Contact,
+        *,
+        device_key: str,
+        build_env: Callable[[Contact], RouteEnv],
+    ) -> None:
+        """Read the route that the radio holds now."""
+        self._ctx = ctx
+        self._contact = contact
+        self._device_key = device_key
+        self._build_env = build_env
+        self._status = self._read()
+
+    def _read(self) -> RouteStatus:
+        return self._ctx.routes.status(self._contact, device_key=self._device_key)
+
+    @property
+    def contact(self) -> Contact:
+        """The target, as the radio reported it the last time."""
+        return self._contact
+
+    def text(self, proven: ProvenRoute | None) -> tuple[str, bool]:
+        """The label of the row, and whether it is lit: a traced route to offer.
+
+        Args:
+            proven: The route that the traces of the screen came home on, or ``None``.
+        """
+        if _offers_traced(self._status, proven):
+            assert proven is not None
+            came = f"{proven.home}/{proven.sent} came home"
+            return f"Use this route for DMs and admin — {came}…", True
+        label = row_label(self._status, sep=" — ")
+        if proven is not None and proven.home > 0:
+            label = label.removesuffix("…") + " · same as the trace…"
+        return label, False
+
+    async def open(self, proven: ProvenRoute | None) -> None:
+        """Open the popup, then read the contact and its route again after a change."""
+        env = self._build_env(self._contact)
+        if not await open_device_route(self._ctx, env, proven=proven):
+            return
+        try:
+            contacts = await self._ctx.devstate.contacts()
+        except Exception:  # noqa: BLE001 - keep the old snapshot, the row still opens
+            contacts = []
+        wanted = self._contact.public_key.lower()
+        self._contact = next((c for c in contacts if c.public_key.lower() == wanted), self._contact)
+        self._status = self._read()

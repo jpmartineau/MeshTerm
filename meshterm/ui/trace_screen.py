@@ -46,6 +46,13 @@ it to. An action list controls the screen: ↑/↓ select a row, and Enter runs 
   winner for adoption. The evidence proposes, the measurement decides, and the user
   makes the choice. When the user adopts a route, the highlight moves to Trace, the
   same as after the composer.
+* **Device route** (Trace target only, for a contact that the radio has) says which route
+  the radio holds for the target, and opens the Device route popup of the node page
+  (refer to :mod:`~meshterm.ui.device_route_screen`). A trace that came home walked its
+  route out and back. Thus, when the route out of such a trace is not the radio's route,
+  the row turns green and offers it: ``Use this route for DMs and admin``. The popup then
+  has *Use the traced route* and *Use and keep it* first. Nothing interrupts the session:
+  only the row changes.
 * **Path width** opens a small dialog, where the user selects the path-hash width for
   each hop: 1, 2, or 4 bytes. A forced hop is addressed by this number of bytes from
   the start of its key. The first value is the routing width of the device. When the
@@ -119,6 +126,8 @@ from ..services import trace_runner
 from ..services.records import first_repeated_edge
 from ..services.topology import render_forced_spec
 from .braillechart import meter
+from .device_route_screen import ICON as ROUTE_ICON
+from .device_route_screen import ProvenRoute, RouteRow
 from .menus import icon_lane, icon_mark, marked_label, section_heading
 from .pathline import (
     ELIDE_HEAD,
@@ -209,7 +218,7 @@ _PATH_LANE = "path            "
 #: are one cell. Thus with a fixed ``"icon "`` prefix, the label of Explore starts one
 #: column to the right of the labels of all the other actions. Refer to
 #: :func:`_icon_lane`.
-_ACTION_ICONS = ("✎", "⇄", "⚡", "⚙", "#", "▶")
+_ACTION_ICONS = ("✎", "⇄", "⚡", ROUTE_ICON, "⚙", "#", "▶")
 
 
 def _icon_lane() -> int:
@@ -491,6 +500,8 @@ class TraceScreen(Screen):
         auto_source: str = "",
         initial_spec: str = "",
         open_trophy_case: Callable[[], Awaitable[None]] | None = None,
+        route_row: RouteRow | None = None,
+        prove: Callable[[list[TraceResult]], ProvenRoute | None] | None = None,
     ) -> None:
         """Create the screen (nothing transmits until the user runs Trace).
 
@@ -548,6 +559,10 @@ class TraceScreen(Screen):
             open_trophy_case: Opens the trophy case over this screen. The left button
                 of the new-record dialog does this. ``None`` leaves only *Close* in the
                 dialog, which is what a screen that runs outside the menu gets.
+            route_row: The Device route row (target mode, for a contact that the radio
+                has), or ``None`` for no row.
+            prove: Finds the route out that the traces of the screen came home on, for
+                the Device route row. ``None`` offers no traced route.
         """
         super().__init__()
         self.title = f"Trace — {target}" if mode == "target" else "Trace path"
@@ -571,6 +586,8 @@ class TraceScreen(Screen):
         self._auto_source = auto_source
         self._path_spec = initial_spec.strip()
         self._open_trophy_case = open_trophy_case
+        self._route_row = route_row if mode == "target" else None
+        self._prove = prove
         #: The trophy case disciplines that the current run placed in. The key is the
         #: title of the discipline, so that a run with more than one sample that
         #: improves keeps only its latest ``"Title — score"`` label for each board.
@@ -614,6 +631,8 @@ class TraceScreen(Screen):
         # path is available. A path walk with no path has nothing to trace, so there the
         # highlight starts on Compose (GitHub #29: Enter then opens the composer).
         actions = ["compose", "explore"] if mode == "target" else ["compose", "reverse"]
+        if self._route_row is not None:
+            actions.append("route")
         actions += ["width", "samples", "trace"]
         self._actions: tuple[str, ...] = tuple(actions)
         ready = mode == "target" or bool(self._effective_spec()[0])
@@ -897,6 +916,35 @@ class TraceScreen(Screen):
             # The same as Compose: when the user adopts a route, the highlight moves to
             # Trace, so Enter walks it (GitHub #29).
             self._open_flow(self._explore, focus_trace=True)
+        elif key == "route":
+            self._open_route()
+
+    def proven(self) -> ProvenRoute | None:
+        """The route out that the traces of this route came home on, or ``None``."""
+        if self._prove is None or not self._traces:
+            return None
+        return self._prove(self._traces)
+
+    def _open_route(self) -> None:
+        """Open the Device route popup over the screen, with the traced route to offer.
+
+        The popup changes no path of this screen: the route of the radio is a different
+        thing from the route that Trace walks. Thus the traces and the medians stay.
+        """
+        row = self._route_row
+        if row is None or self._dialog_open or self._running:
+            return
+        self._dialog_open = True
+        proven = self.proven()
+
+        async def run() -> None:
+            try:
+                await row.open(proven)
+            finally:
+                self._dialog_open = False
+                self._session.invalidate()
+
+        self._session.run_detached(run())
 
     def _open_flow(
         self, flow: PathFlow, seed: str | None = None, focus_trace: bool = False
@@ -1008,10 +1056,11 @@ class TraceScreen(Screen):
             if selected:
                 self._cursor = len(lines)
             lines.append(render_to_ansi(text, width))
-            # Put a gap before the next group: after the build-path group (Explore in
-            # target mode, Reverse in path mode, whichever is last) and after the
-            # trace-settings group.
-            if key in ("explore", "reverse", "samples"):
+            # Put a gap before the next group: after the build-path group (the Device
+            # route row when there is one, else Explore in target mode or Reverse in path
+            # mode) and after the trace-settings group.
+            closes = ("route",) if self._route_row is not None else ("explore", "reverse")
+            if key in (*closes, "samples"):
                 lines.append("")
         # The results are page, not a list window of their own. Nothing highlights them.
         # Thus a private list window hides its rows from the arrows, and gives the frame
@@ -1078,6 +1127,10 @@ class TraceScreen(Screen):
         elif key == "explore":
             _icon(text, "⚡", "warn")
             text.append("Explore paths")
+        elif key == "route" and self._route_row is not None:
+            label, lit = self._route_row.text(self.proven())
+            _icon(text, ROUTE_ICON, "ok" if lit else "accent")
+            text.append(label, style="ok" if lit else "")
         elif key == "width":
             w = self._width_bytes()
             _icon(text, "⚙", "accent")
@@ -2570,6 +2623,61 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
             },
         )
 
+    # The Device route row: only for a target that the radio has as a contact, because the
+    # radio holds a route only for its own contacts (refer to device_route_screen).
+    route_row: RouteRow | None = None
+    prove = None
+    target_key = (target_contact.public_key if target_contact else "").lower()
+    if mode == "target" and target_contact is not None and len(target_key) == 64:
+        from .device_route_screen import RouteEnv
+
+        def build_route_env(current: Contact) -> RouteEnv:
+            """What the popup needs, from all the evidence that is stored now."""
+            topo = fresh_topology()
+            canonical = topo.canonical(target_key) or target_key[:12]
+            radio = (
+                tuple(topo.canonical(h) or h for h in current.route_hops)
+                if current.route_hops is not None
+                else None
+            )
+            return RouteEnv(
+                contact=current,
+                label=target_label or current.name,
+                target=canonical,
+                topology=topo,
+                self_key=(device_hash or "").lower(),
+                width_bytes=width_bytes,
+                resolve=resolve,
+                scenarios=topo.scenarios(
+                    canonical, device_route=radio, outbound=outbound, silent_before=silent_before
+                ),
+                suggested=topo.suggested(canonical, outbound=outbound, silent_before=silent_before),
+                outbound=outbound,
+            )
+
+        def prove(traces: list[TraceResult]) -> ProvenRoute | None:
+            """The route out of the newest trace that came home, with the proof of the run."""
+            home = [t for t in traces if t.success]
+            if not home:
+                return None
+            hops = _previous_outbound(home[-1], target_key)
+            if hops is None:
+                return None
+            stats = TraceStats.from_traces(record_target, traces)
+            return ProvenRoute(
+                hops=tuple(ident.canonical(h) or h for h in hops),
+                home=len(home),
+                sent=len(traces),
+                worst_snr=stats.median_min_snr,
+            )
+
+        route_row = RouteRow(
+            ctx,
+            target_contact,
+            device_key=(device_hash or "").lower(),
+            build_env=build_route_env,
+        )
+
     screen = TraceScreen(
         record_target,
         mode=mode,
@@ -2594,6 +2702,8 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
         # path must end at a real hash.
         initial_spec=initial_spec if (mode == "path" or target_hash is not None) else "",
         open_trophy_case=_trophy_case_opener(ctx),
+        route_row=route_row,
+        prove=prove,
     )
     try:
         await session.run_screen(screen)

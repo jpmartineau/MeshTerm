@@ -233,6 +233,7 @@ def _trace_screen(
     auto_spec=None,
     auto_source="",
     open_trophy_case=None,
+    route_row=None,
 ) -> tuple[TraceScreen, _FakeSession]:
     session = _FakeSession()
 
@@ -261,9 +262,20 @@ def _trace_screen(
         auto_spec=auto_spec or (lambda: ""),
         auto_source=auto_source,
         open_trophy_case=open_trophy_case,
+        route_row=route_row,
     )
     screen.note_viewport(40)  # the frame records this before each real paint
     return screen, session
+
+
+class _RouteRowStub:
+    """The Device route row of Trace target, as the screen reads it (refer to RouteRow)."""
+
+    def text(self, proven):  # noqa: ANN001, ANN201
+        return "Device route — none, it floods…", False
+
+    async def open(self, proven):  # noqa: ANN001, ANN201
+        return None
 
 
 async def test_trace_screen_one_trace_per_enter_accumulates() -> None:
@@ -635,7 +647,8 @@ def test_every_action_row_starts_its_words_in_one_cell_in_both_modes(platform_na
     starts: set[int] = set()
     marks: set[str] = set()
     for mode in ("target", "path"):
-        screen, _ = _trace_screen(mode=mode)
+        # Target mode with the Device route row, so that each declared mark is drawn.
+        screen, _ = _trace_screen(mode=mode, route_row=_RouteRowStub())
         for key in screen._actions:
             for selected in (False, True):
                 row = screen._action_text(key, selected).plain

@@ -1566,6 +1566,16 @@ def _packet_viewer_unknown_scope(cols: int, rows: int) -> Screen:
     return _packet_viewer_scoped(cols, rows, region="elsewhere")
 
 
+class _LitRouteRow:
+    """The Device route row of Trace target after a trace came home on another route."""
+
+    def text(self, proven):  # noqa: ANN001, ANN201
+        return "Use this route for DMs and admin — 1/1 came home…", True
+
+    async def open(self, proven):  # noqa: ANN001, ANN201
+        return None
+
+
 def _trace(cols: int, rows: int) -> Screen:
     async def _noop_flow(current):  # noqa: ANN001
         return current
@@ -1591,6 +1601,7 @@ def _trace(cols: int, rows: int) -> Screen:
         previous=None,
         auto_spec=lambda: "",
         auto_source="",
+        route_row=_LitRouteRow(),
     )
     screen._on_trace(
         TraceResult(
