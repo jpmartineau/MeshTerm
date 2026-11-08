@@ -1665,6 +1665,112 @@ or a hop that is not whole bytes of hex, is a usage error (`2`).
 `{"site", "active", "paths"}`. Each change prints the object that it wrote, for example
 `{"active": "Foulab"}`.
 
+#### `meshterm route`
+
+Show, change, and keep the device routes. The companion holds one *device route* for each
+contact: the relays from your node to the contact. With no route, the radio floods the next
+message. With an empty route, the contact is a neighbour. The radio replaces the route each
+time that it learns a new one, and it never forgets a route that stopped to work. A route
+that you **keep** belongs to the active site (or to a fixed device). MeshTerm writes a kept
+route back each time that the radio replaces it.
+
+A contact is its name, or the first digits of its key. A `SPEC` is the same as `--path` of a
+trace: hops in hex, separated by commas (`a1,3d`). An empty `SPEC` (`--path ""`) means no
+relay.
+
+| Command | What it does |
+| --- | --- |
+| `route` or `route list` | Each contact that has a device route or a kept route. |
+| `route show CONTACT` | The route to one contact, how the radio got it, and where you keep it. |
+| `route set CONTACT --path SPEC` | Write a route to the radio. `--keep` also keeps it. |
+| `route forget CONTACT --yes` | Clear the route, so that the next message floods. A kept route stays kept. |
+| `route keep CONTACT [--path SPEC]` | Keep a route. With no `--path`, MeshTerm keeps the route that the radio holds now. |
+| `route unkeep CONTACT` | Stop keeping the route. The radio keeps the route that it holds. |
+| `route discover CONTACT [--use]` | Send one path discovery and show the route each way. `--use` writes the outward route to the radio. |
+| `route sync` | Make the routes of the radio follow the active site and the kept routes now. |
+
+```console
+$ meshterm route list
+NAME            TYPE         HASH  PATH      ORIGIN   KEPT  ROUTE
+Alice           companion    d4    a1b2c3d4  kept     a1    MockCompanion (00) → Yagi-Repeater (a1b2c3d4) → Alice (d4)
+Local-Repeater  repeater     b2    direct    learned  -     MockCompanion (00) → Local-Repeater (b2)
+$ meshterm route show Alice
+node             Alice
+type             companion
+hash             d4
+key              d4e5f6a700000000000000000000000000000000000000000000000000000000
+path             a1b2c3d4
+origin           kept
+kept             a1
+kept_by          site Home
+kept_in_radio    yes
+skipped          no
+first_hop_heard  -
+route            MockCompanion (00) → Yagi-Repeater (a1b2c3d4) → Alice (d4)
+```
+
+`path` is the route that the radio holds, and `kept` is the route that you keep. Both are
+specs, and a spec goes back into `--path` as it is. `direct` is the plain word for an empty
+spec, and `-` means no route. `origin` is `kept`, `set` (you wrote it in this run), `learned`
+(the radio got it from a path return), or `flood` (no route). The drawn `route` has your node
+and the contact at its ends. `skipped` is `yes` when MeshTerm does not write the kept route
+back because its first hop is silent, and `first_hop_heard` then says when MeshTerm last heard
+that hop.
+
+`discover` sends one path discovery. It is one transmission, and the command waits for the
+answer. It prints the route in each direction, because a radio link is not symmetric. The
+radio does not change its route for this request. With `--use`, MeshTerm writes the outward
+route.
+
+```console
+$ meshterm route discover Alice
+node       Alice
+hash       d4
+answered   yes
+out_path   a1
+in_path    a1
+used       no
+out_route  MockCompanion (00) → Yagi-Repeater (a1) → Alice (d4)
+in_route   Alice (d4) → Yagi-Repeater (a1) → MockCompanion (00)
+```
+
+`sync` does what MeshTerm does at each connection. It saves the routes that the radio
+learned at another site, and clears them from the radio. It writes back the routes that
+belong to the active site, and the routes that you keep. It prints what it did on stderr,
+and the counts on stdout.
+
+Each command that changes a route prints the route as it is afterwards, in the shape of
+`show`. All these commands open the device. A command that keeps a route (`keep`, and
+`set --keep`) needs a record to hold it. When no site is active and the device is not
+fixed, the command fails with `1`, and nothing is written. Its sentence names
+`meshterm outbound use <site>`.
+
+`list` returns `5` when no contact has a route. `unkeep` returns `5` when no route was kept.
+`discover` returns `5` when no answer comes. A bad `SPEC`, a route that the radio cannot
+hold, and a contact that does not exist are usage errors (`2`). `keep` with no `--path`
+is also a usage error when the radio has no route to keep.
+
+**`--json`** gives `list` as an array, and each other command as one object. They have
+these fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `node` | object | The contact: the shared node object. |
+| `path` | string \| null | The route in the radio, as a spec. `""` is no relay. `null` is no route. |
+| `origin` | string | `kept`, `set`, `learned`, or `flood`. |
+| `kept` | string \| null | The route that you keep, as a spec. `null` when you keep none. |
+| `kept_by` | object \| null | `{"source": "site" or "device", "name": …}`. `null` when you keep no route. `show` only. |
+| `kept_in_radio` | boolean \| null | Whether the radio holds the kept route. `show` only. |
+| `skipped` | boolean \| null | Whether the kept route is not written because its first hop is silent. `show` only. |
+| `first_hop_heard_at` | string \| null | When MeshTerm last heard that first hop (UTC). `show` only. |
+| `route` | array \| null | The nodes from your node to the contact, each as a node object. `null` when there is no route. |
+
+`discover` gives `node`, `answered`, `out_path`, `in_path`, `used`, `out_route`, and
+`in_route`. Each is `null` when no answer came. `sync` gives `site` (the active site, or
+`null`), `saved` (an array of `{"site", "routes"}`), `restored`, `kept_written`,
+`kept_skipped` (the names of the contacts), and `failed` (the names of the contacts that the
+radio refused).
+
 #### `meshterm tx-optimize`
 
 Sweep the transmit power of a remote node against a target. Then select the lowest level
