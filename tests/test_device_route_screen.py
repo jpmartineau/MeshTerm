@@ -96,10 +96,12 @@ class _Routes:
 
     def __init__(self, found: DiscoveredRoute | None = None) -> None:
         self.calls: list[tuple[str, tuple]] = []
+        self.contacts: list[str] = []  # the contact of each set, in order
         self.found = found
 
     async def set(self, contact: Contact, hops: tuple) -> tuple:
         self.calls.append(("set", tuple(hops)))
+        self.contacts.append(contact.name)
         return tuple(hops)
 
     async def keep(self, contact: Contact, hops: tuple) -> RouteOwner:
@@ -134,6 +136,26 @@ async def test_a_picked_route_replaces_a_kept_route() -> None:
     assert await _apply(ctx, _env(), kept, (HUB, "27d4"))
     assert await _apply(ctx, _env(), RouteStatus(None, ORIGIN_FLOOD), ())
     assert routes.calls == [("keep", (HUB, "27d4")), ("set", ())]
+
+
+async def test_a_companions_traced_route_is_set_on_the_companion() -> None:
+    """A walk to Alice turns at her last repeater, but the route that it proves is Alice's.
+
+    Alice is a companion, so the walk ``27d4 → Hilltop → 27d4`` turned at Hilltop, the
+    repeater that hears her. The route that came home is the route *to Alice*: both
+    relays, with Hilltop. Use writes it on Alice's contact. It is not the route to Hilltop
+    (``27d4`` alone), and it never goes on Hilltop's contact.
+    """
+    from meshterm.services.trace_plan import previous_outbound
+    from tests.test_live_screens import _walk
+
+    route = previous_outbound(_walk("27d4", "3d63", "27d4"), ALICE_KEY, relays=False)
+    assert route == ("27d4", "3d63")
+    routes = _Routes()
+    ctx, _ = _ctx(routes)
+    assert await _apply(ctx, _env(), RouteStatus(None, ORIGIN_FLOOD), route)
+    assert routes.calls == [("set", ("27d4", "3d63"))]
+    assert routes.contacts == ["Alice"]
 
 
 async def test_discover_shows_both_routes_and_uses_the_route_out() -> None:
