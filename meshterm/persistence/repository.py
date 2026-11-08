@@ -1379,6 +1379,42 @@ class Repository:
             )
         return observations
 
+    def node_type(self, node: str) -> int | None:
+        """The advert type that a node announced the last time MeshTerm heard it say one.
+
+        Trace target asks this for a node that is not a contact (the sender of a message),
+        because a node that does not relay changes the walk (refer to
+        :func:`~meshterm.core.models.relays_traces`).
+
+        Args:
+            node: The key of the node, or a prefix of it, in hex. Observations store the
+                first 12 hex digits. A shorter prefix can name more than one node. Then it
+                gives a type only when all these nodes announced the same type.
+
+        Returns:
+            The ``NODE_TYPE_*`` value, or ``None`` when no stored advert of the node has a
+            type, or when a short prefix names nodes of different types.
+        """
+        prefix = node.lower().removeprefix("0x")[:12]
+        if not prefix:
+            return None
+        # A range, not LIKE, so that the index on ``node`` finds the rows. Each hex digit
+        # sorts before "g".
+        span = (prefix, prefix + "g")
+        if len(prefix) < 12:
+            types = self._conn.execute(
+                "SELECT DISTINCT node_type FROM observations WHERE node >= ? AND node < ? "
+                "AND node_type IS NOT NULL LIMIT 2",
+                span,
+            ).fetchall()
+            return int(types[0]["node_type"]) if len(types) == 1 else None
+        row = self._conn.execute(
+            "SELECT node_type FROM observations WHERE node >= ? AND node < ? "
+            "AND node_type IS NOT NULL ORDER BY observed_at DESC LIMIT 1",
+            span,
+        ).fetchone()
+        return int(row["node_type"]) if row is not None else None
+
     def node_observations(
         self, node: str, *, since: datetime | None = None, limit: int = 50000
     ) -> list[Observation]:

@@ -347,8 +347,26 @@ async def test_mock_device_blank_path_traces() -> None:
     device = MockDevice()
     await device.connect()
     # Try several times, because the simulator sometimes drops very weak links.
-    results = [await device.run_trace("Alice") for _ in range(10)]
+    results = [await device.run_trace("Yagi-Repeater") for _ in range(10)]
     assert any(r.success and r.hops for r in results)
+
+
+async def test_mock_device_node_that_does_not_relay_stops_a_trace() -> None:
+    """As on the real mesh, a simulated companion or room server never relays a trace.
+
+    Alice is a companion and Lakeside BBS is a room server. A forced walk that turns at
+    either one, or that goes through either one, never comes back. A walk that turns at
+    Alice's repeater (``a1b2``) comes back, which is the walk that Trace target gives her.
+    With no path, the simulator routes as the real device does: it turns the walk at the
+    last relay of her learned route, so the trace can come back.
+    """
+    device = MockDevice()
+    await device.connect()
+    assert not (await device.run_trace("Alice", path="a1b2,d4e5,a1b2")).success
+    assert not (await device.run_trace("Lakeside BBS", path="f6a7")).success
+    for path in ("a1b2", None):
+        results = [await device.run_trace("Alice", path=path) for _ in range(10)]
+        assert any(r.success for r in results), path
 
 
 def test_trace_timeout_scales_with_hops() -> None:
@@ -528,13 +546,14 @@ async def _setup_link(optimal_remote_tx: int = 20):
     """Return a connected mock device, the (admin, target) contacts, and the forced path.
 
     The path goes admin → target. Thus the optimizer tunes the admin node and reads the
-    SNR that the target receives from it.
+    SNR that the target receives from it. The target is a repeater, because the walk ends
+    there and must come back: a companion does not relay a trace.
     """
     device = MockDevice(optimal_remote_tx=optimal_remote_tx)
     await device.connect()
     contacts = await device.get_contacts()
     admin = next(c for c in contacts if c.name == "Yagi-Repeater")
-    target = next(c for c in contacts if c.name == "Alice")
+    target = next(c for c in contacts if c.name == "Local-Repeater")
     path = trace_runner.parse_trace_path(f"{admin.name},{target.name}", contacts)
     assert await device.admin_login(admin, "admin")
     return device, admin, target, path

@@ -311,3 +311,33 @@ def test_list_runs_newest_first(repo: Repository) -> None:
 
     tools = [r.tool for r in repo.list_runs()]
     assert tools == ["third", "second", "first"]
+
+
+def test_node_type_is_the_last_type_that_a_node_announced(repo: Repository) -> None:
+    """Trace target asks for the type of a sender that is not a contact.
+
+    A full id gives the newest type that the node announced. A short prefix gives a type
+    only when each node that it names announced the same type, because a hash of one byte
+    can name a companion and a repeater at the same time.
+    """
+    from datetime import timedelta
+
+    from meshterm.core.models import NODE_TYPE_CHAT, NODE_TYPE_REPEATER, Observation, utcnow
+
+    run = repo.start_run("monitor", {}, None)
+    late, early = utcnow(), utcnow() - timedelta(days=1)
+    for node, node_type, when in (
+        ("aa11bb22cc33", NODE_TYPE_REPEATER, early),
+        ("aa11bb22cc33", NODE_TYPE_CHAT, late),  # reflashed as a companion
+        ("aa99bb22cc33", NODE_TYPE_CHAT, late),
+        ("dd44ee55ff66", NODE_TYPE_REPEATER, late),
+    ):
+        repo.record_observation(
+            run, Observation(node=node, name="n", node_type=node_type, observed_at=when)
+        )
+    assert repo.node_type("aa11bb22cc33") == NODE_TYPE_CHAT
+    assert repo.node_type("AA11BB22CC33" + "00" * 26) == NODE_TYPE_CHAT  # a full key
+    assert repo.node_type("aa") is None  # a repeater and a companion: no single type
+    assert repo.node_type("aa99") == NODE_TYPE_CHAT
+    assert repo.node_type("dd44") == NODE_TYPE_REPEATER
+    assert repo.node_type("ee") is None

@@ -148,7 +148,7 @@ def test_snr_bar_unlit_track_dims_to_a_distinct_style() -> None:
     assert snr_bar(10.0).plain == _BAR_FULL * _BAR_WIDTH  # top of range: every cell full
 
 
-# --- _previous_outbound -----------------------------------------------------------
+# --- previous_outbound ------------------------------------------------------------
 
 
 def _walk(*nodes: str, success: bool = True) -> TraceResult:
@@ -167,30 +167,45 @@ def test_previous_outbound_extracts_the_proven_route() -> None:
     report flood). Thus this stored evidence is what auto mode walks for a target that
     has more than one hop.
     """
-    from meshterm.ui.trace_screen import _previous_outbound
+    from meshterm.services.trace_plan import previous_outbound
 
     walk = _walk("3d63", "f2c2", "aabb", "f2c2", "3d63")
-    assert _previous_outbound(walk, "aabb" + "00" * 30) == ("3d63", "f2c2")
+    assert previous_outbound(walk, "aabb" + "00" * 30) == ("3d63", "f2c2")
 
 
 def test_previous_outbound_direct_walk_yields_no_repeaters() -> None:
     """A direct answer (the target only) gives an empty outbound leg: destination only again."""
-    from meshterm.ui.trace_screen import _previous_outbound
+    from meshterm.services.trace_plan import previous_outbound
 
-    assert _previous_outbound(_walk("aabb"), "aabb" + "00" * 30) == ()
+    assert previous_outbound(_walk("aabb"), "aabb" + "00" * 30) == ()
 
 
 def test_previous_outbound_rejects_unusable_history() -> None:
     """MeshTerm never reuses failures, asymmetric walks, and walks that turned elsewhere."""
-    from meshterm.ui.trace_screen import _previous_outbound
+    from meshterm.services.trace_plan import previous_outbound
 
     target = "aabb" + "00" * 30
-    assert _previous_outbound(None, target) is None
-    assert _previous_outbound(_walk("3d63", "aabb", "3d63", success=False), target) is None
+    assert previous_outbound(None, target) is None
+    assert previous_outbound(_walk("3d63", "aabb", "3d63", success=False), target) is None
     # Asymmetric: it came home a different way, so it is not a boomerang to this target.
-    assert _previous_outbound(_walk("3d63", "aabb", "f2c2"), target) is None
+    assert previous_outbound(_walk("3d63", "aabb", "f2c2"), target) is None
     # Palindromic, but it turned at some other node and not at our target.
-    assert _previous_outbound(_walk("3d63", "9999", "3d63"), target) is None
+    assert previous_outbound(_walk("3d63", "9999", "3d63"), target) is None
+
+
+def test_previous_outbound_of_a_target_that_does_not_relay_keeps_the_turn() -> None:
+    """A walk to a companion turned at its last relay. That relay ends the route to it.
+
+    The companion stops a trace, so it is never in the walk. The middle hop is the relay
+    that hears it, and the route to the companion goes up to and with that relay.
+    """
+    from meshterm.services.trace_plan import previous_outbound
+
+    target = "aabb" + "00" * 30
+    walk = _walk("3d63", "f2c2", "3d63")
+    assert previous_outbound(walk, target, relays=False) == ("3d63", "f2c2")
+    assert previous_outbound(_walk("3d63"), target, relays=False) == ("3d63",)
+    assert previous_outbound(_walk("3d63", "f2c2", "9999"), target, relays=False) is None
 
 
 # --- _previous_walk ---------------------------------------------------------------
@@ -234,6 +249,7 @@ def _trace_screen(
     auto_source="",
     open_trophy_case=None,
     route_row=None,
+    **extra,  # noqa: ANN003 - more TraceScreen arguments, as given
 ) -> tuple[TraceScreen, _FakeSession]:
     session = _FakeSession()
 
@@ -263,9 +279,68 @@ def _trace_screen(
         auto_source=auto_source,
         open_trophy_case=open_trophy_case,
         route_row=route_row,
+        **extra,
     )
     screen.note_viewport(40)  # the frame records this before each real paint
     return screen, session
+
+
+def test_trace_screen_names_the_relay_where_a_companions_walk_turns() -> None:
+    """Alice stops a trace, so her walk turns at f2c2. A line under the route says so."""
+    screen, _ = _trace_screen(
+        auto_spec=lambda: "3d63,f2c2,3d63", auto_source="best observed · 5×", relays=False
+    )
+    body = _plain(screen.render_body(72))
+    assert "Alice can't relay a trace, so the trace turns at f2c2" in body
+    assert screen._actions[screen._index] == "trace"  # a turn: Enter traces at once
+
+
+def test_trace_screen_wraps_the_turn_line_under_the_route_lane() -> None:
+    """The line is a sentence, so it wraps at 53 cells, and no line of the page is wider."""
+    from rich.cells import cell_len
+
+    screen, _ = _trace_screen(
+        auto_spec=lambda: "3d63,f2c2,3d63", relays=False, target_label="A-companion-name"
+    )
+    lines = _plain(screen.render_body(53)).splitlines()
+    assert all(cell_len(line) <= 53 for line in lines)
+    note = [line for line in lines if "relay a trace" in line or "turns at" in line]
+    assert len(note) == 2 and all(line.startswith(" " * 7) for line in note)
+
+
+async def test_trace_screen_with_no_relay_to_turn_at_has_nothing_to_walk() -> None:
+    """A companion with no relay on its route: Trace is dim, and Enter on it sends nothing."""
+    ran: list[str] = []
+
+    async def trace(path_spec, on_trace):  # noqa: ANN001
+        ran.append(path_spec)
+
+    screen, _ = _trace_screen(trace=trace, relays=False)
+    body = " ".join(_plain(screen.render_body(72)).split())  # the line wraps at 72 cells
+    assert "none — no relay to turn at" in body
+    assert "Alice can't relay a trace, and no relay on the way to it is known" in body
+    assert "Trace — no relay to turn at" in body
+    assert screen._actions[screen._index] == "compose"  # the highlight starts where it can act
+    screen._index = screen._actions.index("trace")
+    screen.handle("enter")
+    assert ran == [] and screen._worker is None
+
+
+def test_trace_screen_offers_no_relays_for_a_neighbour_that_does_not_relay() -> None:
+    """A neighbour companion has no relay to turn at, and its route is no relays.
+
+    The Device route row offers that route at once. When a spec gives a walk, the offer
+    goes away, because the screen then proves a route of its own.
+    """
+    from meshterm.ui.device_route_screen import ProvenRoute
+
+    offer = ProvenRoute(hops=(), home=0, sent=0, heard=4)
+    screen, _ = _trace_screen(relays=False, neighbour=True, offer=offer)
+    body = " ".join(_plain(screen.render_body(72)).split())  # the line wraps at 72 cells
+    assert "it's a direct neighbour: no relay to turn at" in body
+    assert screen.proven() == offer
+    armed, _ = _trace_screen(auto_spec=lambda: "3d63", relays=False, offer=offer)
+    assert armed.proven() is None
 
 
 class _RouteRowStub:

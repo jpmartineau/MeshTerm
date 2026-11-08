@@ -223,6 +223,28 @@ def test_the_trace_row_lights_only_for_a_route_that_is_a_change() -> None:
     assert not _row(("3d",)).text(failed)[1]
 
 
+def test_a_neighbour_that_does_not_relay_is_offered_no_relays() -> None:
+    """A companion heard directly has no relay at which a walk turns. Its proof is the packets.
+
+    The row offers no relays at once, and the popup's first row says so. A radio that
+    already holds no relays offers nothing. A route with relays needs a trace as its proof.
+    """
+    from meshterm.ui.device_route_screen import ProvenRoute
+
+    heard = ProvenRoute(hops=(), home=0, sent=0, heard=4)
+    assert heard.proved and heard.evidence() == "heard directly 4×"
+    assert _row(("3d",)).text(heard) == (
+        "Use no relays for DMs and admin — heard directly 4×…",
+        True,
+    )
+    assert not _row(()).text(heard)[1]
+    assert not ProvenRoute(hops=("3d",), home=0, sent=0, heard=4).proved
+    learned = RouteStatus(("3d",), ORIGIN_LEARNED, owner=HOME)
+    rows = [row for row in _action_rows(learned, heard) if isinstance(row, Choice)]
+    assert rows[0].value == "traced"
+    assert "Use no relays" in str(rows[0].title)
+
+
 def test_the_popup_offers_the_traced_route_first() -> None:
     """Use the traced route, then Use and keep it (with a site), then the usual rows."""
     from meshterm.ui.device_route_screen import ProvenRoute

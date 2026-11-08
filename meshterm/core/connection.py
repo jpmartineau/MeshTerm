@@ -54,6 +54,7 @@ from .models import (
     advert_gate,
     advert_time,
     clock_tolerance_s,
+    relays_traces,
     utcnow,
 )
 from .privatekey import normalize as normalize_key
@@ -4083,8 +4084,10 @@ class MeshCoreDevice(Device):
         else:
             # No forced path: build a path that ends at the target's own hash (with
             # any learned ``out_path`` repeaters before it), because a trace replies only
-            # when its destination is the last hop. It is ``None`` only when the contact
-            # is unknown, and then the trace runs without a path.
+            # when its destination is the last hop. A target that does not relay turns at
+            # its last learned repeater instead. It is ``None`` when the contact is
+            # unknown, or when it does not relay and has no learned repeater. Then the
+            # trace runs without a path.
             resolved = await self._trace_path_to_contact(mc, target)
             if resolved is not None:
                 path_bytes, flags = resolved
@@ -4180,6 +4183,11 @@ class MeshCoreDevice(Device):
           repeaters to mirror, so the outbound leg is the full path).
         * learned multi-hop route → ``[repeater…, destination, repeater… (reversed)]``.
 
+        A destination that does not relay (a companion, a room server, or a sensor, refer
+        to :func:`~meshterm.core.models.relays_traces`) stops the trace. Then the walk turns
+        at the last repeater of the learned route, and the destination is not in it. With
+        no learned repeater, there is no turn, and the function returns ``None``.
+
         Each hash is encoded again at the trace's own width (``1 << flags``, only
         1/2/4/8 bytes). This changes the routing width of a region (for example 3) to the
         widest value that the trace can represent (2). The firmware matches by hash
@@ -4190,8 +4198,8 @@ class MeshCoreDevice(Device):
             target: The contact name (not case-sensitive), or a key prefix.
 
         Returns:
-            ``(path_bytes, flags)`` to walk, or ``None`` only when the contact is
-            unknown or has no public key to address.
+            ``(path_bytes, flags)`` to walk, or ``None`` when the contact is unknown, has
+            no public key to address, or does not relay and has no learned repeater.
         """
         payload = await self._contacts_payload(mc)
         needle = target.casefold()
@@ -4223,6 +4231,11 @@ class MeshCoreDevice(Device):
                 route = bytes.fromhex(out_path)[: out_path_len * size]
                 repeaters = [route[i * size : i * size + trace_size] for i in range(out_path_len)]
             dest = bytes.fromhex(pub)[:trace_size]
+            if not relays_traces(_as_int(info.get("type", info.get("adv_type")))):
+                # The destination does not relay, so the walk turns at the last repeater.
+                if not repeaters:
+                    return None
+                dest, repeaters = repeaters[-1], repeaters[:-1]
             # The outbound leg always ends at the destination's own hash, so the
             # destination recognizes the trace and replies. The return leg mirrors the same
             # repeaters back to us, because nothing sends the packet back automatically.
@@ -5975,6 +5988,42 @@ class MockDevice(Device):
         offset = (remote_tx - self.optimal_remote_tx) / span
         return 9.0 - 24.0 * (offset**2)
 
+    def _stops_trace(self, target: str, forced: list[str] | None) -> bool:
+        """Whether a simulated contact that does not relay is in the walk, so that it stops.
+
+        With a forced path, a hop stops the walk when it names a contact that does not
+        relay, and no contact that relays. (On the real mesh, a repeater with the same hash
+        relays the trace.) With no path, the device routes the trace as the real device
+        does (refer to :meth:`MeshCoreDevice._trace_path_to_contact`): for a target that
+        does not relay, the walk turns at the last relay of its learned route. Thus only
+        such a target with no learned relay stops it.
+
+        Args:
+            target: The target of the trace, as a name or a key prefix.
+            forced: The hops of the forced path, or ``None`` when the device routes.
+
+        Returns:
+            Whether the trace stops before it comes home.
+        """
+
+        def named(contact: Contact, token: str) -> bool:
+            key = (contact.public_key or contact.key_prefix or "").lower()
+            return bool(token) and key.startswith(token.strip().lower())
+
+        if forced is None:
+            needle = target.casefold()
+            return any(
+                not relays_traces(c.node_type)
+                and not c.route_hops
+                and (c.name.casefold() == needle or named(c, target))
+                for c in self._contacts
+            )
+        for token in forced:
+            matches = [c for c in self._contacts if named(c, token)]
+            if matches and not any(relays_traces(c.node_type) for c in matches):
+                return True
+        return False
+
     async def run_trace(  # noqa: D102 - inherited docstring
         self,
         target: str,
@@ -5987,6 +6036,12 @@ class MockDevice(Device):
         forced = [h for h in path.split(",") if h.strip()] if path else None
         # As on the real device: the path-hash width is the byte length of a forced hop.
         hash_bytes = len(bytes.fromhex(forced[0])) if forced else None
+        if self._stops_trace(target, forced):
+            # As on the real mesh: a node that does not relay ends the walk there, and
+            # nothing comes back (refer to relays_traces).
+            return TraceResult(
+                target=target, success=False, tx_power=self._tx_power, path_hash_bytes=hash_bytes
+            )
         depth = len(forced) if forced else self._rng.randint(1, 3)
         hops: list[Hop] = []
         for i in range(depth):

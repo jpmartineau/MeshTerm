@@ -69,6 +69,32 @@ def node_type_label(node_type: int | None) -> str | None:
     return NODE_TYPE_LABELS.get(int(node_type), f"type {node_type}")
 
 
+#: The advert types whose stock firmware does not relay a packet. A trace comes back only
+#: when each node of its path relays it (``allowPacketForward`` in ``Mesh.cpp``). Thus a
+#: trace cannot turn at one of these nodes. The defaults of the firmware:
+#:
+#: * A companion relays only with "client repeat" on. This setting is off by default, and
+#:   the firmware accepts it only on the off-grid frequencies (433.000, 869.495, and
+#:   918.000 MHz).
+#: * A room server and a sensor relay only when their admin sets ``disable_fwd`` off. It
+#:   is on by default.
+#:
+#: MeshTerm cannot read these settings on a remote node. Thus it uses the defaults.
+_NO_RELAY_TYPES = frozenset({NODE_TYPE_CHAT, NODE_TYPE_ROOM, NODE_TYPE_SENSOR})
+
+
+def relays_traces(node_type: int | None) -> bool:
+    """Whether a node of this advert type relays a trace, so that a trace can turn at it.
+
+    A repeater relays. A companion, a room server, and a sensor do not, by default (refer
+    to :data:`_NO_RELAY_TYPES`). A trace to such a node turns at the last relay before it.
+    The route that the trace walks out is then the full route to the node, because the node
+    itself is never a hop of its own route. An unknown type returns ``True``: MeshTerm
+    cannot tell, so it traces the node itself, as it did before it knew the rule.
+    """
+    return node_type not in _NO_RELAY_TYPES
+
+
 class LoginResult(Enum):
     """How an admin login ended, and also whether the node was there to end it.
 

@@ -222,6 +222,7 @@ class PathComposerScreen(Screen):
         target_id: str | None = None,
         target_hash: str | None = None,
         target_label: str | None = None,
+        target_relays: bool = True,
         device_hash: str | None = None,
         hops: list[str] | None = None,
         cursor: int | None = None,
@@ -250,6 +251,11 @@ class PathComposerScreen(Screen):
                 the symmetric spec. When the user confirms the path, it is truncated to the
                 width of the spec.
             target_label: The name of the target to show in the route preview.
+            target_relays: Whether the target relays a trace. ``False`` turns the walk at
+                the last composed hop, and the target is not in the spec or the preview
+                (refer to :func:`~meshterm.services.topology.render_forced_spec`). The
+                user then composes the route up to and with the relay that hears the
+                target.
             device_hash: The public key of our node. Thus the endpoints of the preview have
                 a hash, exactly like the route line of the trace screen.
             hops: The canonical ids of the hops that are already composed (when the
@@ -280,6 +286,7 @@ class PathComposerScreen(Screen):
         self._target_id = target_id
         self._target_hash = (target_hash or "").lower().removeprefix("0x")
         self._target_label = target_label
+        self._target_relays = target_relays
         self._device_label = device_label
         self._device_hash = (device_hash or "").lower().removeprefix("0x")
         self._topology = topology
@@ -520,7 +527,12 @@ class PathComposerScreen(Screen):
         The spec is empty until the walk has one hop or more.
         """
         if self._mirrored:
-            return render_forced_spec(tuple(self._hops), self._target_hash, self._width_bytes)
+            return render_forced_spec(
+                tuple(self._hops),
+                self._target_hash,
+                self._width_bytes,
+                relays=self._target_relays,
+            )
         if self._outbound:  # the stored form: each hop at its full width
             return ",".join(self._hops)
         return render_custom_spec(tuple(self._hops), self._width_bytes)
@@ -534,6 +546,9 @@ class PathComposerScreen(Screen):
         are important, because a repeated section of the outbound leg also repeats on the
         return leg.
         """
+        if self._mirrored and not self._target_relays:
+            # The walk turns at the last hop: the target is not in it.
+            return [*self._hops, *reversed(self._hops[:-1])]
         if self._mirrored:
             return [*self._hops, str(self._target_id), *reversed(self._hops)]
         return list(self._hops)
@@ -637,7 +652,11 @@ class PathComposerScreen(Screen):
         """
         entries: list[str | None] = [None]
         entries.extend(self._path_entry(hop) for hop in self._hops)
-        if self._mirrored:
+        turn = 1  # the target, at the turn. A target that does not relay is not in the walk
+        if self._mirrored and not self._target_relays:
+            turn = 0
+            entries.extend(self._path_entry(hop) for hop in reversed(self._hops[:-1]))
+        elif self._mirrored:
             entries.append(self._path_entry(self._target_id))
             entries.extend(self._path_entry(hop) for hop in reversed(self._hops))
         if self._outbound:
@@ -665,7 +684,7 @@ class PathComposerScreen(Screen):
             self_name=self._device_label,
             hash_bytes=self._width_bytes,
             device_hash=self._device_hash or None,
-            dim_from=(2 if self._mirrored else 1) + len(self._hops),
+            dim_from=(1 + turn if self._mirrored else 1) + len(self._hops),
             bare_self=True,
             # The entries start with our ★, so arrow index k (the slot after shown node k)
             # is rendered-hop index k + 1.

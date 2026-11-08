@@ -6,9 +6,11 @@ a UX concept. The menu divides the feature at exactly that line:
 
 * **Trace target** (``trace``): *can I get to this node?* Select a target from a list in
   the order of recency. The live screen composes and explores symmetric routes that turn
-  at the target and come back over the mirrored hops. The list stays pushed below for
-  the full visit. Thus Esc from a walk goes back to the row that started it (sorted
-  again by the last trace), and the next node is one Enter away.
+  at the target and come back over the mirrored hops. A target that does not relay (a
+  companion, a room server, or a sensor) stops a trace, so its walk turns at the last
+  relay before it. The list stays pushed below for the full visit. Thus Esc from a walk
+  goes back to the row that started it (sorted again by the last trace), and the next
+  node is one Enter away.
 * **Trace path** (``trace-path``): *how far can a route that I make go?* No target and
   no picker. The user composes the full walk hop by hop, and it must only end at a node
   that our node can hear. The traces are stored under the ``(path)`` sentinel, so the
@@ -27,7 +29,7 @@ stored under it. Thus the stored history is the same, wherever it came from.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -40,6 +42,7 @@ from ..core.models import (
     Contact,
     TraceResult,
     TraceStats,
+    utcnow,
 )
 from ..services import trace_runner
 from ..ui.widgets import stats_panel
@@ -169,8 +172,12 @@ class TraceTool(Tool):
 
         It has the same ``NAME · TRACED · HEARD · PKTS · KEY`` lanes, Ctrl+arrow sort ring,
         and type-to-filter as the Contacts screen and the courier recipient. But it lists
-        all the node types (a trace answers *can I get to this node?* for a repeater or a
-        room, the same as for a companion). It also has one more lane, ``TRACED``: how
+        all the node types, because a trace answers *can I get to this node?* for each
+        type. A repeater relays the trace itself. A companion, a room server, or a sensor
+        does not relay (refer to :func:`~meshterm.core.models.relays_traces`). Thus its
+        walk turns at the last relay of its route, which is also a route that the radio
+        can send to it on. The trace screen says so, so the list does not mark these
+        rows (JP, 2026-11-08). It also has one more lane, ``TRACED``: how
         long ago each node was last traced. The list opens sorted by ``TRACED``, in
         descending order. Thus the most recently traced node comes first, and the nodes
         that were never traced are at the bottom. Enter commits the highlighted node as
@@ -422,10 +429,13 @@ async def _trace_once_cli(
     # Resolve an optional forced path (names or hex) to the hex string that the radio
     # accepts. A blank path is fully supported for a *target* trace: the device uses again
     # the route that it already learned (or floods if it has no route). A path walk always
-    # has a path.
+    # has a path. A target that does not relay gets the walk that the menu gives it, which
+    # turns at its last relay.
     path: str | None = None
     if path_spec:
         path = trace_runner.parse_trace_path(path_spec, contacts)
+    elif not is_walk:
+        path = await _turned_path(ctx, device, contacts, target, device_hash, resolve)
 
     with ctx.ui.progress("trace") as progress:
         task = progress.add_task("walking the path" if is_walk else f"tracing {target}", total=1)
@@ -479,6 +489,117 @@ async def _trace_once_cli(
         report=report,
         exit_code=exitcodes.OK if result.success else exitcodes.NO_RESULT,
     )
+
+
+async def _turned_path(
+    ctx: AppContext,
+    device: Any,
+    contacts: list[Contact],
+    target: str,
+    device_hash: str | None,
+    resolve: Any,
+) -> str | None:
+    """The forced walk for a target that does not relay: the walk of the menu, or ``None``.
+
+    A companion, a room server, or a sensor stops a trace (refer to
+    :func:`~meshterm.core.models.relays_traces`). Thus the device cannot route a trace to
+    it. This function chooses the route as the menu does
+    (:func:`~meshterm.services.trace_plan.plan_route`), and turns the walk at the last
+    relay of that route. A line on stderr names that relay. For a target that relays, or
+    that MeshTerm cannot identify, the function returns ``None``, and the device routes
+    the trace as before.
+
+    Args:
+        ctx: The shared application context.
+        device: The connected device.
+        contacts: The contacts of the device.
+        target: The target as the user typed it: a contact name or a key prefix.
+        device_hash: The public key of our node, or ``None``.
+        resolve: Names a hop hash, for the line on stderr.
+
+    Returns:
+        The forced spec, or ``None`` when the device can route the trace.
+
+    Raises:
+        typer.BadParameter: When the target does not relay and no relay on the way to it
+            is known. Nothing is transmitted, so this is a usage error.
+    """
+    from rich.markup import escape
+
+    from ..core.models import relays_traces
+    from ..services.topology import (
+        MeshTopology,
+        build_topology,
+        collapse_width,
+        is_path_hash,
+        render_forced_spec,
+    )
+    from ..services.trace_plan import plan_route
+
+    needle, prefix = target.casefold(), target.lower()
+    contact = next(
+        (
+            c
+            for c in contacts
+            if c.name.casefold() == needle or (c.public_key or "").lower().startswith(prefix)
+        ),
+        None,
+    )
+    raw = ((contact.public_key or contact.key_prefix) if contact else target).lower()
+    raw = raw.removeprefix("0x")
+    if not is_path_hash(raw):
+        return None
+    node_type = contact.node_type if contact is not None else ctx.repo.node_type(raw[:12])
+    if relays_traces(node_type):
+        return None
+
+    ident = MeshTopology(device_hash or "local", contacts)
+    store = getattr(ctx, "outbound_store", None)
+    choice = store.lookup(device_hash) if store is not None else None
+    outbound = (
+        tuple(tuple(ident.canonical(h) or h for h in path) for path in choice.paths)
+        if choice is not None
+        else ()
+    )
+    device_route = None
+    if contact is not None and contact.route_hops is not None:
+        device_route = tuple(ident.canonical(h) or h for h in contact.route_hops)
+    plan = plan_route(
+        raw,
+        topology=lambda: build_topology(
+            self_id=device_hash or "local",
+            contacts=contacts,
+            trace_paths=ctx.repo.trace_paths(),
+            packet_paths=ctx.repo.packet_paths(),
+            neighbour_links=ctx.repo.neighbour_links(),
+        ),
+        device_route=device_route,
+        outbound=outbound,
+        choice=choice,
+        silent_before=utcnow() - timedelta(hours=ctx.preferences.outbound_silent_hours),
+        previous=ctx.repo.latest_trace(target),
+        relays=False,
+    )
+    try:
+        mode = int(await device.get_path_hash_mode())
+    except Exception:  # noqa: BLE001 - an optional read. The 1-byte default always works.
+        mode = 0
+    width = collapse_width(ceiling=max(mode + 1, 1))
+    spec = render_forced_spec(plan.hops, raw, width, relays=False)
+    name = contact.name if contact is not None else target
+    if not spec:
+        raise typer.BadParameter(
+            f"{name} can't relay a trace, and no relay on the way to it is known — "
+            "trace a repeater near it, or give --path",
+            param_hint="'--target'",
+        )
+    tokens = spec.split(",")
+    turn = tokens[len(tokens) // 2]
+    ctx.ui.ack(
+        f"{escape(name)} can't relay a trace, so the trace turns at "
+        f"{escape(resolve(turn) or turn)} ({plan.source})"
+    )
+    return spec
 
 
 def _trace_report(

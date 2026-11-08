@@ -156,8 +156,9 @@ samples:
   matching width, they match.
 - **A `trace` that the device routes invents its hop names.** If you give
   `trace --target NAME` with no `--path`, the simulator router returns placeholder hops.
-  A forced path (`--path "a1,d4"`) resolves correctly. The samples use the forced form.
-  Use the forced form also to build a golden file.
+  A forced path (`--path "a1,b2,a1"`) resolves correctly. The samples use the forced
+  form. Use the forced form also to build a golden file. As on the real mesh, a forced
+  path through a simulated companion or room server never comes home.
 
 > **`--mock` records into its own history, not yours, but it still writes the caches.**
 > The simulator is a fake radio. It is not a fake MeshTerm. MeshTerm stores what the
@@ -230,8 +231,8 @@ would be a behaviour that nobody can find.
 different. These are two lines from the facts block of a trace:
 
 ```
-path        a1,d4
-route       MockCompanion (00) → Yagi-Repeater (a1) → Alice (d4) → MockCompanion (00)
+path        a1,b2
+route       MockCompanion (00) → Yagi-Repeater (a1) → Local-Repeater (b2) → MockCompanion (00)
 ```
 
 A **path** is a spec. It is the list of hops that you write and force. It is the one line
@@ -1547,19 +1548,20 @@ Walk the path to a target one time and report what came back.
 without a target is [`trace-path`](#meshterm-trace-path).
 
 ```console
-$ meshterm trace --target Alice --path "a1,d4"
-target      Alice
-path        a1,d4
+$ meshterm trace --target Local-Repeater --path "a1,b2,a1"
+target      Local-Repeater
+path        a1,b2,a1
 success     yes
-hops        3
+hops        4
 min_snr_db  +2.0
-rtt_ms      123
-route       MockCompanion (00) → Yagi-Repeater (a1) → Alice (d4) → MockCompanion (00)
+rtt_ms      458
+route       MockCompanion (00) → Yagi-Repeater (a1) → Local-Repeater (b2) → Yagi-Repeater (a1) → MockCompanion (00)
 
 HOP  FROM  TO  SNR_DB
   0  00    a1    +6.0
-  1  a1    d4    +2.0
-  2  d4    00    +6.0
+  1  a1    b2    +2.0
+  2  b2    a1    +2.4
+  3  a1    00    +6.0
 ```
 
 The output has two blocks. The first block shows what the walk did. It has the drawn
@@ -1572,6 +1574,24 @@ and the hash joins the two blocks.
 A trace that never came home is **not** a failure of the command. The radio transmitted,
 and the walk ran. The command reports `success no` and returns `5`.
 
+A companion, a room server, or a sensor does not relay a trace, so a walk that turns at
+one of them never comes home. When the target is one of these and you omit `--path`,
+MeshTerm chooses the route as the menu does. Then the walk turns at the last repeater of
+that route. A line on stderr names that repeater, and `path` shows the walk:
+
+```console
+$ meshterm trace --target Alice
+Alice can't relay a trace, so the trace turns at Yagi-Repeater (device route)
+target      Alice
+path        a1
+success     yes
+...
+```
+
+The route out of that walk is also the route that the radio can use to send to the
+target. If MeshTerm knows no repeater on the way to the target, nothing is transmitted,
+and the command returns `2`.
+
 #### `meshterm trace-path`
 
 The other half of tracing. It has no target. You compose a path by hand, out and back, in
@@ -1582,19 +1602,19 @@ any way that you choose. The path only has to end where this node can hear it.
 | `--path SPEC` | **Required.** The whole walk, comma-separated. |
 
 ```console
-$ meshterm trace-path --path "a1,d4,a1"
+$ meshterm trace-path --path "a1,b2,a1"
 target      -
-path        a1,d4,a1
+path        a1,b2,a1
 success     yes
 hops        4
 min_snr_db  +2.0
 rtt_ms      458
-route       MockCompanion (00) → Yagi-Repeater (a1) → Alice (d4) → Yagi-Repeater (a1) → MockCompanion (00)
+route       MockCompanion (00) → Yagi-Repeater (a1) → Local-Repeater (b2) → Yagi-Repeater (a1) → MockCompanion (00)
 
 HOP  FROM  TO  SNR_DB
   0  00    a1    +6.0
-  1  a1    d4    +2.0
-  2  d4    a1    +2.4
+  1  a1    b2    +2.0
+  2  b2    a1    +2.4
   3  a1    00    +6.0
 ```
 
@@ -1618,8 +1638,8 @@ table of hops is under `edges`.
 | `edges` | array | The `edge` shape, one for each hop, in the order of the walk. `[]` when nothing came home. |
 
 ```console
-$ meshterm trace-path --path "a1,d4" --json | jq -r '.edges | min_by(.snr_db) | "\(.from.hash) -> \(.to.hash)  \(.snr_db) dB"'
-a1 -> d4  2.0 dB
+$ meshterm trace-path --path "a1,b2" --json | jq -r '.edges | min_by(.snr_db) | "\(.from.hash) -> \(.to.hash)  \(.snr_db) dB"'
+a1 -> b2  2.0 dB
 ```
 
 #### `meshterm outbound`
@@ -2331,14 +2351,14 @@ fi
 are about:
 
 ```bash
-meshterm trace-path --path "a1,d4" --json \
+meshterm trace-path --path "a1,b2" --json \
   | jq -r '.edges | min_by(.snr_db) | "\(.from.hash) -> \(.to.hash)  \(.snr_db) dB"'
 ```
 
 **A route as one line**, with our node, as the plain face draws it:
 
 ```bash
-meshterm trace-path --path "a1,d4,a1" --json \
+meshterm trace-path --path "a1,b2,a1" --json \
   | jq -r '.route | map(.name // .hash) | join(" -> ")'
 ```
 

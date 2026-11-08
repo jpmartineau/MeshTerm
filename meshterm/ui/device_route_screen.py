@@ -27,6 +27,9 @@ Trace target has the same row (:class:`RouteRow`). A trace that came home walked
 out and back, which is the best proof that MeshTerm can have for a route. Thus, after such
 a trace, the row offers the route that the trace walked (a :class:`ProvenRoute`), and the
 popup gets two rows before the others: **Use the traced route** and **Use and keep it**.
+A contact that does not relay a trace and that our node hears directly has no relay at
+which a walk can turn. There, the row offers no relays at once, with the packets heard as
+its proof, and the first row of the popup is **Use no relays**.
 """
 
 from __future__ import annotations
@@ -139,7 +142,11 @@ class RouteEnv:
 
 @dataclass(frozen=True, slots=True)
 class ProvenRoute:
-    """A route out to a contact that traces walked, and on which they came home.
+    """A route out to a contact with proof: traces that came home on it, or a neighbour heard.
+
+    The usual proof is a trace. A contact that does not relay a trace and that MeshTerm
+    hears directly has no relay at which a walk can turn. Its proof is the packets that our
+    node heard from it with no relay, and its route is no relays.
 
     Attributes:
         hops: The relays from our node to the contact, as canonical ids. Empty means no
@@ -147,15 +154,25 @@ class ProvenRoute:
         home: How many traces came home on the route.
         sent: How many traces went out on it.
         worst_snr: The median bottleneck SNR (dB) of the traces that came home, if known.
+        heard: How many times our node heard the contact directly, for a route with no
+            relays and no trace. It is 0 for a route that traces proved.
     """
 
     hops: tuple[str, ...]
     home: int
     sent: int
     worst_snr: float | None = None
+    heard: int = 0
+
+    @property
+    def proved(self) -> bool:
+        """Whether there is proof to offer the route on: a trace came home, or a neighbour heard."""
+        return self.home > 0 or (not self.hops and self.heard > 0)
 
     def evidence(self) -> str:
-        """The proof in words: ``came home 5 of 5 · worst +3.5 dB``."""
+        """The proof in words: ``came home 5 of 5 · worst +3.5 dB``, or ``heard directly 4×``."""
+        if not self.home:
+            return f"heard directly {self.heard}×"
         text = f"came home {self.home} of {self.sent}"
         if self.worst_snr is not None:
             text += f" · worst {self.worst_snr:+.1f} dB"
@@ -255,23 +272,27 @@ def _status_rows(
             )
     if _offers_traced(status, proven):
         assert proven is not None
-        rows.append(_note(f"the trace {proven.evidence()} on:"))
+        if proven.home:
+            rows.append(_note(f"the trace {proven.evidence()} on:"))
+        else:
+            rows.append(_note(f"{env.label} can't relay a trace, and it was {proven.evidence()}:"))
         rows.append(_route_note(env.line(proven.hops)))
     return rows
 
 
 def _offers_traced(status: RouteStatus, proven: ProvenRoute | None) -> bool:
-    """Whether the traced route is a change: it came home, and the radio holds another."""
-    return proven is not None and proven.home > 0 and not same_route(status.hops, proven.hops)
+    """Whether the proven route is a change: it has its proof, and the radio holds another."""
+    return proven is not None and proven.proved and not same_route(status.hops, proven.hops)
 
 
 def _action_rows(status: RouteStatus, proven: ProvenRoute | None = None) -> list[Any]:
-    """The actions of the first page, for the state of the route and a traced route."""
+    """The actions of the first page, for the state of the route and a proven route."""
     rows: list[tuple[str, str, str]] = []
     if _offers_traced(status, proven):
+        assert proven is not None
         rows.append(
             (
-                "Use the traced route",
+                "Use the traced route" if proven.home else "Use no relays",
                 "the kept route changes too" if status.kept is not None else "set it now",
                 _USE_TRACED,
             )
@@ -573,6 +594,8 @@ class RouteRow:
         """
         if _offers_traced(self._status, proven):
             assert proven is not None
+            if not proven.home:
+                return f"Use no relays for DMs and admin — {proven.evidence()}…", True
             came = f"{proven.home}/{proven.sent} came home"
             return f"Use this route for DMs and admin — {came}…", True
         label = row_label(self._status, sep=" — ")

@@ -599,7 +599,7 @@ async def test_probe_paths_defaults_to_one_trace_per_candidate() -> None:
 
 
 def _composer(  # noqa: ANN001
-    topo, hops=None, fetch_nodes=frozenset(), target=True, cursor=None, resolve=None
+    topo, hops=None, fetch_nodes=frozenset(), target=True, cursor=None, resolve=None, relays=True
 ):
     """A composer over ``topo``, pinned on Far (target mode) or with no target."""
     pinned = (
@@ -607,6 +607,7 @@ def _composer(  # noqa: ANN001
             target_id="f2c24f54551e",
             target_hash="f2c24f54551e" + "0" * 52,
             target_label="Far",
+            target_relays=relays,
         )
         if target
         else {}
@@ -1231,3 +1232,61 @@ def test_composer_row_cursor_clamps_at_both_ends() -> None:
     for _ in range(last + 5):
         screen.handle("down")
     assert screen._index == last
+
+
+# --- a target that does not relay -------------------------------------------------------
+
+
+def test_only_a_repeater_or_an_unknown_type_relays_a_trace() -> None:
+    """A companion, a room server, and a sensor stop a trace with the firmware defaults."""
+    from meshterm.core.models import (
+        NODE_TYPE_CHAT,
+        NODE_TYPE_REPEATER,
+        NODE_TYPE_ROOM,
+        NODE_TYPE_SENSOR,
+        relays_traces,
+    )
+
+    assert relays_traces(NODE_TYPE_REPEATER)
+    assert relays_traces(None)  # MeshTerm cannot tell, so it traces the node itself
+    assert not any(relays_traces(t) for t in (NODE_TYPE_CHAT, NODE_TYPE_ROOM, NODE_TYPE_SENSOR))
+
+
+def test_a_target_that_does_not_relay_turns_the_walk_at_its_last_relay() -> None:
+    """A companion stops a trace, so the walk turns at the relay that hears it.
+
+    The route to the companion stays the same. Only the walk changes: the companion is not
+    in it, and its hash does not limit the width of the walk.
+    """
+    from meshterm.services.topology import render_forced_spec
+
+    target = "d4e5" + "00" * 30
+    hops = ("3d63c6429436", "f2c24f54551e")
+    assert render_forced_spec(hops, target, 2) == "3d63,f2c2,d4e5,f2c2,3d63"
+    assert render_forced_spec(hops, target, 2, relays=False) == "3d63,f2c2,3d63"
+    assert render_forced_spec(hops[:1], target, 2, relays=False) == "3d63"
+    assert render_forced_spec((), target, 2, relays=False) == ""  # no relay: no turn
+    assert render_forced_spec(hops, "d4", 2) == "3d,f2,d4,f2,3d"
+    assert render_forced_spec(hops, "d4", 2, relays=False) == "3d63,f2c2,3d63"
+
+
+@pytest.mark.parametrize("relays", [True, False])
+def test_forced_outbound_finds_the_route_that_the_forced_spec_walks(relays: bool) -> None:
+    """The two functions are inverses, for a target that relays and for one that does not."""
+    from meshterm.services.topology import forced_outbound, render_forced_spec
+
+    target = "d4e5" + "00" * 30
+    for hops in (("3d63",), ("3d63", "f2c2"), ("3d63", "f2c2", "27d4")):
+        spec = render_forced_spec(hops, target, 2, relays=relays)
+        assert forced_outbound(spec.split(","), target, relays=relays) == hops
+    assert forced_outbound(["3d63", "f2c2"], target, relays=relays) is None  # even: no turn
+    assert forced_outbound(["3d63", "f2c2", "27d4"], target, relays=relays) is None
+
+
+def test_composer_for_a_target_that_does_not_relay_turns_at_the_last_hop() -> None:
+    """The walk turns at the last composed hop. Far is not in the spec or in the preview."""
+    screen = _composer(_topo(), hops=["3d63c6429436", "27d4396a2967"], relays=False)
+    assert screen._spec() == "3d,27,3d"
+    assert screen._walk_nodes() == ["3d63c6429436", "27d4396a2967", "3d63c6429436"]
+    assert "Far" not in screen._route_preview().text().plain
+    assert _composer(_topo(), relays=False)._spec() == ""  # no relay: nothing to walk

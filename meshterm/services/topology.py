@@ -118,7 +118,9 @@ def is_path_hash(value: str) -> bool:
     return bool(value) and len(value) % 2 == 0 and all(c in _HEX_DIGITS for c in value)
 
 
-def render_forced_spec(hops: tuple[str, ...], target_hash: str, width_bytes: int) -> str:
+def render_forced_spec(
+    hops: tuple[str, ...], target_hash: str, width_bytes: int, *, relays: bool = True
+) -> str:
     """Render a symmetric forced-path spec: the outbound hops, the target, the mirror back.
 
     The MeshCore trace protocol has no separate "return path" field. The full boomerang
@@ -129,6 +131,12 @@ def render_forced_spec(hops: tuple[str, ...], target_hash: str, width_bytes: int
     route that the user composed, and that comes back on a different path, is rendered
     exactly as given by :func:`render_custom_spec` instead.
 
+    A target that does not relay (a companion, a room server, or a sensor, refer to
+    :func:`~meshterm.core.models.relays_traces`) cannot be the turn of a walk, because the
+    trace stops there. Then the walk turns at the last hop of the route, the relay that
+    hears the target, and the target is not in the spec. The hops are the same route to
+    the target in the two cases. Only the walk on the air is different.
+
     Args:
         hops: Intermediate repeaters, in order from our node outward, without the two
             endpoints (empty means to trace the target directly, with no forced hops).
@@ -136,14 +144,57 @@ def render_forced_spec(hops: tuple[str, ...], target_hash: str, width_bytes: int
         width_bytes: The preferred path-hash width for each hop, in bytes (1, 2, 4, or
             8). :func:`collapse_width` makes it smaller when the known hash of a hop is
             narrower.
+        relays: Whether the target relays a trace. ``False`` turns the walk at the last
+            hop.
 
     Returns:
-        A comma-separated hex spec, for example ``"3d,f2,3d"`` for one forced hop.
+        A comma-separated hex spec, for example ``"3d,f2,3d"`` for one forced hop. It is
+        ``""`` for a target that does not relay with no hops: there is no relay at which
+        the walk can turn.
     """
-    width = collapse_width(*hops, target_hash, ceiling=width_bytes)
-    outbound = [h[: width * 2] for h in (*hops, target_hash)]
-    outbound.extend(h[: width * 2] for h in reversed(hops))
+    if relays:
+        turn, legs = target_hash, hops
+    elif hops:
+        turn, legs = hops[-1], hops[:-1]
+    else:
+        return ""
+    width = collapse_width(*legs, turn, ceiling=width_bytes)
+    outbound = [h[: width * 2] for h in (*legs, turn)]
+    outbound.extend(h[: width * 2] for h in reversed(legs))
     return ",".join(outbound)
+
+
+def forced_outbound(
+    tokens: Sequence[str], target_hash: str, *, relays: bool = True
+) -> tuple[str, ...] | None:
+    """The route to the target that a symmetric walk carries: the inverse of the forced spec.
+
+    :func:`render_forced_spec` makes a walk from a route. This function finds the route
+    again in a walk. The walk must be a palindrome of odd length, the shape of each walk
+    that the forced spec makes. For a target that relays, the middle hop must be the
+    target, and the route is the hops before it. For a target that does not relay, the
+    middle hop is the last relay of the route, and the route is the hops up to and with
+    it.
+
+    Args:
+        tokens: The hop hashes of the walk, in walk order, without our node.
+        target_hash: The hex hash of the target (any width). The middle hop of a walk to a
+            target that relays must be a prefix of it.
+        relays: Whether the target relays a trace.
+
+    Returns:
+        The hop hashes of the route, in order from our node outward (empty means that the
+        target is a neighbour). ``None`` when the walk is not a boomerang of this shape.
+    """
+    hops = [t.lower() for t in tokens]
+    if not hops or len(hops) % 2 == 0 or hops != hops[::-1]:
+        return None
+    mid = len(hops) // 2
+    if not relays:
+        return tuple(hops[: mid + 1])
+    if not target_hash.lower().startswith(hops[mid]):
+        return None
+    return tuple(hops[:mid])
 
 
 def render_custom_spec(hops: tuple[str, ...], width_bytes: int) -> str:
@@ -328,20 +379,23 @@ class PathScenario:
     samples: int = 0
     rank: int = 0
 
-    def spec(self, target_hash: str, width_bytes: int) -> str:
+    def spec(self, target_hash: str, width_bytes: int, *, relays: bool = True) -> str:
         """Render the scenario as a forced-path spec, with the return leg.
 
-        Refer to :func:`render_forced_spec` for the rules of the width and the return leg.
+        Refer to :func:`render_forced_spec` for the rules of the width, the return leg,
+        and a target that does not relay.
 
         Args:
             target_hash: The hex hash of the target (any width ≥ 1 byte).
             width_bytes: The preferred path-hash width for each hop, in bytes (1, 2, 4,
                 or 8).
+            relays: Whether the target relays a trace.
 
         Returns:
-            A comma-separated hex spec, for example ``"3d,f2,3d"``.
+            A comma-separated hex spec, for example ``"3d,f2,3d"``. It is ``""`` when the
+            walk has no relay at which to turn.
         """
-        return render_forced_spec(self.hops, target_hash, width_bytes)
+        return render_forced_spec(self.hops, target_hash, width_bytes, relays=relays)
 
 
 class MeshTopology:

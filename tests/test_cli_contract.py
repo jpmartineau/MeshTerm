@@ -520,7 +520,7 @@ def test_a_trace_draws_its_route_with_arrows_and_keeps_its_path_in_commas(run) -
     name like each other hop. The ``★`` of the menu says "you already know who this is".
     This is true for the user, and it is not true for a person who opens the file later.
     """
-    result = run("trace-path", "--path", "a1,d4,a1")
+    result = run("trace-path", "--path", "a1,b2,a1")
     assert result.exit_code == exitcodes.OK, result.output
     facts = dict(line.split(None, 1) for line in result_lines(result) if line and " " in line)
     assert facts["success"] == "yes"
@@ -534,9 +534,23 @@ def test_a_trace_draws_its_route_with_arrows_and_keeps_its_path_in_commas(run) -
     assert "→" not in facts["path"]
 
 
+def test_a_trace_to_a_companion_turns_at_its_relay_and_says_so(run) -> None:  # noqa: ANN001
+    """Alice is a companion, which stops a trace. The walk turns at her relay, Yagi-Repeater.
+
+    The CLI chooses the route as the menu does, and says on stderr where the walk turns.
+    stdout keeps only the answer, with the walk in its ``path`` fact.
+    """
+    result = run("trace", "--target", "Alice")
+    assert result.exit_code in (exitcodes.OK, exitcodes.NO_RESULT), result.output
+    assert "Alice can't relay a trace, so the trace turns at Yagi-Repeater" in result.stderr
+    assert "relay a trace" not in result.stdout
+    facts = dict(line.split(None, 1) for line in result_lines(result) if line and " " in line)
+    assert "," not in facts["path"] and "a1b2c3d4".startswith(facts["path"])
+
+
 def test_a_trace_reports_its_per_hop_readings_under_a_header(run) -> None:  # noqa: ANN001
     """The second block has one record for each hop. The hash joins it to the route line."""
-    lines = result_lines(run("trace-path", "--path", "a1,d4,a1"))
+    lines = result_lines(run("trace-path", "--path", "a1,b2,a1"))
     header = next(line for line in lines if line.startswith("HOP"))
     assert header.split() == ["HOP", "FROM", "TO", "SNR_DB"]
 
