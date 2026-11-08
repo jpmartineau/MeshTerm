@@ -1110,6 +1110,166 @@ async def test_chat_screen_retry_resends_failed_message() -> None:
     assert "✓" in "\n".join(screen.render_body(60))
 
 
+class _ChoiceSession(_PasteSession):
+    """A stub session. Its button dialogs give a scripted answer, such as ``"flood"``."""
+
+
+def _dm_screen(
+    session: _StubSession,
+    messages: list[ChatMessage],
+    calls: list[str],
+    *,
+    route: tuple[str, ...] | None = ("3d",),
+    with_flood: bool = True,
+) -> ChatScreen:
+    """A direct chat whose two resend hooks write down which one ran.
+
+    Each hook stands in for the real retry: it marks the message as delivered.
+    """
+
+    async def resend(message: ChatMessage) -> ChatMessage:
+        calls.append("route")
+        message.acked = True
+        return message
+
+    async def resend_flood(message: ChatMessage) -> ChatMessage:
+        calls.append("flood")
+        message.acked = True
+        return message
+
+    conv = Conversation(
+        label="Alice",
+        is_channel=False,
+        contact=Contact(
+            name="Alice", public_key="d4" + "0" * 62, key_prefix="d4e5f6a7", route_hops=route
+        ),
+    )
+    return ChatScreen(
+        conv,
+        messages,
+        send=None,
+        names={},
+        session=session,
+        resend=resend,
+        resend_flood=resend_flood if with_flood else None,
+    )
+
+
+async def _drain_retry(screen: ChatScreen) -> None:
+    """Let the scheduled retry choice and the retry task run to their end."""
+    for _ in range(100):
+        await asyncio.sleep(0)
+    assert not screen._retry_open and not screen._sending
+
+
+async def test_ctrl_r_on_a_message_that_went_by_route_asks_route_or_flood() -> None:
+    """The dialog has Cancel, On route, and By flood. The flood is the default on the right."""
+    session = _ChoiceSession(answer=None)
+    sent = ChatMessage(text="hello", outbound=True, peer="d4e5f6a7", acked=False, flood=False)
+    calls: list[str] = []
+    screen = _dm_screen(session, [sent], calls)
+
+    screen.handle("retry")
+    await _drain_retry(screen)
+
+    assert len(session.dialogs) == 1
+    prompt, buttons, kwargs = session.dialogs[0]
+    assert [label for label, _ in buttons] == ["Cancel", "On route", "By flood"]
+    assert kwargs["default"] == 2 and kwargs["title"] == "Retry"
+    assert kwargs["footer_hint"] == "←→ choose · Enter select · Esc cancel"
+    assert "hello" in prompt.plain and "flood" in prompt.plain
+    assert calls == [] and sent.acked is False, "Cancel transmits nothing"
+
+
+async def test_ctrl_r_by_flood_forgets_the_route_through_the_flood_hook_only() -> None:
+    """Choosing By flood calls the flood retry one time. The retry on the route stays unused."""
+    session = _ChoiceSession(answer="flood")
+    sent = ChatMessage(text="hello", outbound=True, peer="d4e5f6a7", acked=False, flood=False)
+    calls: list[str] = []
+    screen = _dm_screen(session, [sent], calls)
+
+    screen.handle("retry")
+    await _drain_retry(screen)
+
+    assert calls == ["flood"]
+    assert sent.acked is True
+
+
+async def test_ctrl_r_on_route_keeps_the_old_retry() -> None:
+    """Choosing On route is the plain retry of before: one send, no route change."""
+    session = _ChoiceSession(answer="route")
+    sent = ChatMessage(text="hello", outbound=True, peer="d4e5f6a7", acked=False, flood=False)
+    calls: list[str] = []
+    screen = _dm_screen(session, [sent], calls)
+
+    screen.handle("retry")
+    await _drain_retry(screen)
+
+    assert calls == ["route"]
+
+
+async def test_ctrl_r_on_a_message_that_went_by_flood_retries_with_no_question() -> None:
+    """A flood cannot be stale. The plain ^R stays, and it never floods by itself."""
+    session = _ChoiceSession(answer="flood")
+    sent = ChatMessage(text="hello", outbound=True, peer="d4e5f6a7", acked=False, flood=True)
+    calls: list[str] = []
+    screen = _dm_screen(session, [sent], calls)
+
+    screen.handle("retry")
+    await _drain_retry(screen)
+
+    assert session.dialogs == []
+    assert calls == ["route"]  # the plain retry hook: it sends as the device decides
+
+
+async def test_ctrl_r_on_a_stored_message_follows_the_route_of_the_contact() -> None:
+    """A message from the history has no flood fact. The route of the contact decides."""
+    stored = ChatMessage(text="old", outbound=True, peer="d4e5f6a7", acked=False)
+    with_route, without_route = _ChoiceSession(answer=None), _ChoiceSession(answer=None)
+
+    routed = _dm_screen(with_route, [stored], [], route=("3d",))
+    routed.handle("retry")
+    await _drain_retry(routed)
+    assert len(with_route.dialogs) == 1
+
+    calls: list[str] = []
+    flooded = _dm_screen(without_route, [stored], calls, route=None)
+    flooded.handle("retry")
+    await _drain_retry(flooded)
+    assert without_route.dialogs == [] and calls == ["route"]
+
+
+async def test_ctrl_r_without_a_flood_hook_is_the_plain_retry() -> None:
+    """A chat with no flood retry connected never asks."""
+    session = _ChoiceSession(answer="flood")
+    sent = ChatMessage(text="hello", outbound=True, peer="d4e5f6a7", acked=False, flood=False)
+    calls: list[str] = []
+    screen = _dm_screen(session, [sent], calls, with_flood=False)
+
+    screen.handle("retry")
+    await _drain_retry(screen)
+
+    assert session.dialogs == [] and calls == ["route"]
+
+
+async def test_the_status_line_names_the_flood_choice_after_a_failed_route_retry() -> None:
+    """A retry on the route that still gets no ack says that ^R can also flood."""
+    session = _ChoiceSession(answer="route")
+    sent = ChatMessage(text="hello", outbound=True, peer="d4e5f6a7", acked=False, flood=False)
+    screen = _dm_screen(session, [sent], [])
+
+    async def failing(message: ChatMessage) -> ChatMessage:
+        message.acked = False
+        message.flood = False
+        return message
+
+    screen._resend = failing
+    screen.handle("retry")
+    await _drain_retry(screen)
+
+    assert screen._status == "still no ack — ^R to retry on the route or by flood"
+
+
 async def test_chat_fkey_lane_dims_retry_and_the_nav_slots() -> None:
     """The lane offers Retry only for a message to retry, and navigation only with a transcript."""
 
@@ -1835,6 +1995,58 @@ async def test_service_resend_updates_ack_in_place(repo: Repository) -> None:
         stored = repo.recent_chat_messages(is_channel=False, peer=peer)
         assert len(stored) == 1  # changed in place, not duplicated
         assert stored[0].acked is True
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_service_resend_by_flood_forgets_the_route_first(repo: Repository) -> None:
+    """A retry by flood forgets the route (a local action), flushes the cache, and sends once."""
+    from types import SimpleNamespace
+
+    device = MockDevice()
+    ctx = _StubContext(device, repo)
+    invalidated: list[int] = []
+    ctx.devstate = SimpleNamespace(invalidate_contacts=lambda: invalidated.append(1))
+    chat = ChatService(ctx)
+    await chat.start()
+    try:
+        alice = next(c for c in await device.get_contacts() if c.name == "Alice")
+        assert alice.route_hops is not None
+        sent = await chat.send_direct(alice, "hey")
+        assert sent.flood is False, "the first send went along the learned route"
+
+        before = device._sent_codes
+        await chat.resend_direct(alice, sent, flood=True)
+
+        held = next(c for c in await device.get_contacts() if c.name == "Alice")
+        assert held.route_hops is None, "the route is forgotten"
+        assert sent.flood is True, "the retry flooded"
+        assert invalidated == [1]
+        assert device._sent_codes == before + 1, "one transmission"
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_service_resend_on_the_route_leaves_the_route_alone(repo: Repository) -> None:
+    """The plain retry never touches the route and never flushes the cache."""
+    from types import SimpleNamespace
+
+    device = MockDevice()
+    ctx = _StubContext(device, repo)
+    invalidated: list[int] = []
+    ctx.devstate = SimpleNamespace(invalidate_contacts=lambda: invalidated.append(1))
+    chat = ChatService(ctx)
+    await chat.start()
+    try:
+        alice = next(c for c in await device.get_contacts() if c.name == "Alice")
+        sent = await chat.send_direct(alice, "hey")
+        await chat.resend_direct(alice, sent)
+
+        held = next(c for c in await device.get_contacts() if c.name == "Alice")
+        assert held.route_hops == alice.route_hops and sent.flood is False
+        assert invalidated == []
     finally:
         await chat.stop()
         await device.disconnect()

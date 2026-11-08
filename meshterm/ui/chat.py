@@ -279,6 +279,7 @@ class ChatScreen(Screen):
         pages: ContactPages | None = None,
         self_name: str | None = None,
         self_key: str | None = None,
+        resend_flood: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -319,6 +320,9 @@ class ChatScreen(Screen):
             self_name: The name of our node (refer to :func:`our_node`). Our messages and
                 the mentions of our name show it (:func:`~meshterm.ui.widgets.self_chip`).
             self_key: Our public key, which gives the hue of that chip.
+            resend_flood: Like ``resend``, but it first forgets the route that the device
+                learned to the contact, so that the retry floods (direct chats only).
+                With ``None``, ^R always retries on the route, as it did before.
         """
         super().__init__()
         self._self_name = self_name
@@ -346,6 +350,8 @@ class ChatScreen(Screen):
         self._messages = list(messages)
         self._send = send
         self._resend = resend
+        self._resend_flood = resend_flood if not conversation.is_channel else None
+        self._route_contact = contact
         self._resend_unscoped = resend_unscoped if conversation.is_channel else None
         self._paths = paths
         self._locator = locator
@@ -367,6 +373,7 @@ class ChatScreen(Screen):
         self._codes_open = False  # one share screen of links at a time
         self._paste_open = False  # one paste-confirm dialog at a time
         self._resend_open = False  # one resend-unscoped confirm at a time
+        self._retry_open = False  # one route-or-flood choice at a time
         # The selection: the index of the highlighted message (or None when the compose
         # line has the focus), and the body line where it rendered, so that the frame keeps
         # it visible.
@@ -1607,17 +1614,90 @@ class ChatScreen(Screen):
             None,
         )
 
+    def _went_by_route(self, message: ChatMessage) -> bool:
+        """Whether the last transmission of ``message`` went along a learned route.
+
+        The device tells how it sent the message (:attr:`ChatMessage.flood`). A message
+        that is loaded from the history has no such fact. For that message, the answer
+        comes from the contact: a contact with a route is sent to along that route. Thus
+        the answer is ``False`` when no flood retry is connected.
+        """
+        if self._resend_flood is None:
+            return False
+        if message.flood is not None:
+            return not message.flood
+        contact = self._route_contact
+        return contact is not None and contact.route_hops is not None
+
     def _retry(self) -> None:
-        """Try again to deliver the most recent unacknowledged direct message (Ctrl-R)."""
+        """Try again to deliver the most recent unacknowledged direct message (Ctrl-R).
+
+        A message that went along the learned route gets a choice first
+        (:meth:`_begin_retry_choice`). The route is the most common cause of a message
+        that is lost with no error, and a retry on the same route fails in the same way.
+        A message that already went by flood is sent again at once, with no question.
+        """
         target = self._retry_target()
-        if target is None:
+        if target is None or self._retry_open:
             return
+        if self._went_by_route(target):
+            self._begin_retry_choice(target)
+            return
+        self._start_retry(target, flood=False)
+
+    def _start_retry(self, target: ChatMessage, *, flood: bool) -> None:
+        """Send ``target`` again, one time, on the route or (with ``flood``) by flood."""
         self._sending = True
         target.acked = None  # back to the spinner while the retry is in flight
-        self._status = "retrying…"
+        self._status = "retrying by flood…" if flood else "retrying…"
         self._stick = True
         self._session.invalidate()
-        self._spawn(self._resend_message(target))
+        self._spawn(self._resend_message(target, flood=flood))
+
+    def _begin_retry_choice(self, target: ChatMessage) -> None:
+        """Ask whether to retry on the learned route or by flood, then send one time (^R).
+
+        The companion keeps one route for each contact and never forgets a route that is
+        no longer valid. Thus a message on a dead route gets no ack, and each retry on that
+        route fails in the same way (GitHub issue 34). A flood goes around the route, and
+        the companion learns a new one from the answer. A flood reaches each repeater in
+        range, so it is the choice of the user, never a default of the program. The
+        buttons follow the dialog standard: the safe way out on the left, and the
+        committing choice on the right, which is also the default. Either choice is the
+        one transmission.
+        """
+        self._retry_open = True
+        preview = target.text if len(target.text) <= 32 else target.text[:31] + "…"
+
+        async def run() -> None:
+            try:
+                choice = await self._session.button_dialog(
+                    Text(
+                        f"“{preview}” got no ack on the route that your radio learned. A "
+                        "route goes stale when the mesh changes. Send it again on the "
+                        "route, or by flood?"
+                    ),
+                    [("Cancel", None), ("On route", "route"), ("By flood", "flood")],
+                    title="Retry",
+                    default=2,
+                    footer_hint="←→ choose · Enter select · Esc cancel",
+                )
+            finally:
+                self._retry_open = False
+            # A late ack can settle the message while the dialog is up. Then nothing remains
+            # to send.
+            usable = (
+                choice in ("route", "flood")
+                and not self._sending
+                and self._resend is not None
+                and target.acked is False
+            )
+            if not usable or (choice == "flood" and self._resend_flood is None):
+                self._session.invalidate()
+                return
+            self._start_retry(target, flood=choice == "flood")
+
+        self._spawn(run())
 
     def _begin_resend_unscoped(self) -> None:
         """Confirm, then send a scoped channel message again, unscoped (^R).
@@ -1676,16 +1756,31 @@ class ChatScreen(Screen):
 
         self._spawn(run())
 
-    async def _resend_message(self, message: ChatMessage) -> None:
-        """Run a retry to its end, and refresh the delivery state of the message in place."""
+    async def _resend_message(self, message: ChatMessage, *, flood: bool = False) -> None:
+        """Run a retry to its end, and refresh the delivery state of the message in place.
+
+        With ``flood``, the retry first forgets the route of the contact (the
+        ``resend_flood`` callable). If the retry still gets no ack, the status line says
+        that ^R can try again. It also names the flood choice when the last send went
+        along the route.
+        """
         assert self._resend is not None
         try:
-            await self._spin_while(self._resend(message))
+            if flood:
+                assert self._resend_flood is not None
+                await self._spin_while(self._resend_flood(message))
+            else:
+                await self._spin_while(self._resend(message))
         except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
             message.acked = False
             self._status = f"retry failed: {exc}"
         else:
-            self._status = "" if message.acked else "still no ack — ^R to retry"
+            if message.acked:
+                self._status = ""
+            elif self._went_by_route(message):
+                self._status = "still no ack — ^R to retry on the route or by flood"
+            else:
+                self._status = "still no ack — ^R to retry"
         finally:
             self._sending = False
             self._stick = True
@@ -1801,6 +1896,16 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
                 ctx, lambda: ctx.chat.resend_direct(conversation.contact, message)
             )
 
+    resend_flood: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None
+    if not conversation.is_channel:
+
+        async def resend_flood(message: ChatMessage) -> ChatMessage:
+            assert conversation.contact is not None
+            return await _with_restore(
+                ctx,
+                lambda: ctx.chat.resend_direct(conversation.contact, message, flood=True),
+            )
+
     from .map_screen import Locator
     from .node_detail_screen import ContactPages
 
@@ -1821,6 +1926,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         pages=await ContactPages.gather(ctx, self_key=self_key or ""),
         self_name=self_name,
         self_key=self_key,
+        resend_flood=resend_flood,
     )
     ctx.chat.set_active(conversation.key)
 

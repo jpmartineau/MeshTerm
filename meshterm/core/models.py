@@ -698,6 +698,12 @@ class ChatMessage:
             messages. This includes our own posts, which a room never sends back. It also
             includes the command-line replies of a room, which have its conversation key
             but are not posts (refer to :attr:`is_post`).
+        flood: How the device sent our last transmission of an outbound direct message:
+            ``True`` to the whole mesh, ``False`` along the route that it learned. ``None``
+            when the device did not tell, and for each message that is not our own direct
+            message. MeshTerm does not store this value. A message that is loaded from the
+            history has ``None``. The chat uses it to decide whether ^R offers a retry by
+            flood (a route that gets no ack can be stale, and a flood goes around it).
     """
 
     text: str
@@ -715,6 +721,7 @@ class ChatMessage:
     row_id: int | None = None
     scope: str | None = None
     author: str | None = None
+    flood: bool | None = field(default=None, compare=False)
 
     @property
     def is_post(self) -> bool:

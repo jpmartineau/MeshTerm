@@ -770,6 +770,163 @@ async def test_a_typed_password_with_no_reply_asks_nothing_more(ctx) -> None:  #
     assert ctx.admin_store.get(_NODE) is None
 
 
+class _RoutedNode:
+    """A device whose node is silent while its route is stale, as the companion's is.
+
+    ``reset_route`` forgets the stale route, and then the node answers its password.
+    ``log`` lists the calls in order, and ``routes`` counts the ``reset_route`` calls.
+    """
+
+    def __init__(self, password: str, *, stale: bool = True) -> None:
+        self.password = password
+        self.stale = stale
+        self.log: list[str] = []
+
+    async def admin_login(self, node: Contact, password: str) -> LoginResult:  # noqa: ARG002
+        self.log.append(f"login:{password}")
+        await asyncio.sleep(0)
+        if self.stale or password != self.password:
+            return LoginResult.NO_REPLY
+        return LoginResult.ACCEPTED
+
+    async def reset_route(self, node: Contact) -> None:  # noqa: ARG002
+        self.log.append("reset")
+        self.stale = False
+
+
+_ROUTED = Contact(
+    name="Yagi-Repeater", public_key="a1b2c3d4" * 8, key_prefix="a1b2c3d4", route_hops=("3d",)
+)
+
+
+def _watch_cache(ctx) -> list[int]:  # noqa: ANN001
+    """Replace the contact cache of the context with one that counts its invalidations."""
+    from types import SimpleNamespace
+
+    flushed: list[int] = []
+    ctx._devstate = SimpleNamespace(invalidate_contacts=lambda: flushed.append(1))
+    return flushed
+
+
+async def test_a_silent_stored_password_on_a_route_offers_a_flood_and_it_works(ctx) -> None:  # noqa: ANN001
+    """GitHub issue 34. A stale route is silent. Try by flood forgets it, then logs in once."""
+    from meshterm.ui.admin_login import log_in
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx.ui = TuiUi(TuiSession())
+    flushed = _watch_cache(ctx)
+    ctx.admin_store.remember(_ROUTED, "secret")
+    device = _RoutedNode("secret")
+    task = asyncio.ensure_future(log_in(ctx, device, _ROUTED, why="Log in.", again="try again"))
+    try:
+        offer = await _top(ctx, ButtonDialog)
+        assert offer is not None, "a silence on a route offers a choice"
+        assert [label for label, _ in offer._buttons] == [
+            "Cancel",
+            "New password…",
+            "Try by flood",
+        ]
+        assert offer._index == 2, "Try by flood is the default on the right"
+        assert "route" in offer._prompt.plain and "password changed" in offer._prompt.plain
+        assert device.log == ["login:secret"], "nothing floods before the user chooses"
+        offer.resolve("flood")
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is True
+    assert device.log == ["login:secret", "reset", "login:secret"]
+    assert flushed == [1]
+
+
+async def test_cancel_on_the_flood_offer_sends_nothing_more(ctx) -> None:  # noqa: ANN001
+    """Cancel leaves the route as it was and sends no second login."""
+    from meshterm.ui.admin_login import log_in
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx.ui = TuiUi(TuiSession())
+    flushed = _watch_cache(ctx)
+    ctx.admin_store.remember(_ROUTED, "secret")
+    device = _RoutedNode("secret")
+    task = asyncio.ensure_future(log_in(ctx, device, _ROUTED, why="Log in.", again="try again"))
+    try:
+        (await _top(ctx, ButtonDialog)).resolve(None)
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is False
+    assert device.log == ["login:secret"] and flushed == []
+    assert ctx.admin_store.get(_ROUTED) == "secret"
+
+
+async def test_a_typed_password_on_a_route_offers_only_cancel_and_flood(ctx) -> None:  # noqa: ANN001
+    """With no stored password, a new password is not a choice. The flood is."""
+    from meshterm.ui.admin_login import log_in
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog, TextScreen
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx.ui = TuiUi(TuiSession())
+    _watch_cache(ctx)
+    device = _RoutedNode("typed")
+    task = asyncio.ensure_future(log_in(ctx, device, _ROUTED, why="Log in.", again="try again"))
+    try:
+        (await _top(ctx, TextScreen)).resolve("typed")
+        offer = await _top(ctx, ButtonDialog)
+        assert [label for label, _ in offer._buttons] == ["Cancel", "Try by flood"]
+        assert offer._index == 1
+        offer.resolve("flood")
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is True
+    assert device.log == ["login:typed", "reset", "login:typed"]
+    assert ctx.admin_store.get(_ROUTED) == "typed"
+
+
+async def test_a_flood_that_also_gets_no_reply_is_not_offered_again(ctx) -> None:  # noqa: ANN001
+    """One flood for each flow. The next silence gets the dialog of before (no flood button)."""
+    from meshterm.ui.admin_login import log_in
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.prompt import ButtonDialog
+    from meshterm.ui.tui.session import TuiSession
+
+    ctx.ui = TuiUi(TuiSession())
+    _watch_cache(ctx)
+    ctx.admin_store.remember(_ROUTED, "old")
+    # The node is down, or its password changed. A flood changes nothing.
+    device = _RoutedNode("other")
+    task = asyncio.ensure_future(log_in(ctx, device, _ROUTED, why="Log in.", again="try again"))
+    try:
+        (await _top(ctx, ButtonDialog)).resolve("flood")
+        again = await _step_until(
+            lambda: (
+                ctx.ui.session.top
+                if isinstance(ctx.ui.session.top, ButtonDialog) and len(device.log) == 3
+                else None
+            )
+        )
+        assert again is not None
+        assert [label for label, _ in again._buttons] == ["Cancel", "New password…"]
+        again.resolve(None)
+        ok = await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+    assert ok is False
+    assert device.log == ["login:old", "reset", "login:old"], "exactly one flood"
+
+
 def test_a_refusal_message_starts_its_sentences_with_a_capital() -> None:
     """A typed password has nothing to clear. The message once read "(wrong password?). try"."""
     from meshterm.ui.admin_login import refused_text

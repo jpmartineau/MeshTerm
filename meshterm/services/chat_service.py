@@ -511,7 +511,9 @@ class ChatService:
                     return is_direct_messageable(contact.node_type)
         return False
 
-    async def _deliver_direct(self, contact: Contact, text: str) -> tuple[bool, list[str]]:
+    async def _deliver_direct(
+        self, contact: Contact, text: str
+    ) -> tuple[bool, list[str], bool | None]:
         """Transmit a direct message, and try again softly until it is acknowledged.
 
         One logical send makes one first transmission, plus up to
@@ -531,8 +533,10 @@ class ChatService:
             text: The message body.
 
         Returns:
-            Whether an attempt was acknowledged in its wait, and the ack code of each
-            attempt. A late ack can still carry any of these codes (the device keeps them).
+            Whether an attempt was acknowledged in its wait, the ack code of each attempt,
+            and how the device sent the last attempt (``True`` flood, ``False`` along its
+            learned route, ``None`` if it did not tell). A late ack can still carry any of
+            the codes (the device keeps them).
 
         Raises:
             Exception: A hard send failure (the companion rejects the send) goes to the
@@ -542,12 +546,14 @@ class ChatService:
         device = await self._ctx.device()
         attempts = max(0, self._ctx.preferences.direct_message_soft_retries) + 1
         codes: list[str] = []
+        flood: bool | None = None
         for attempt in range(1, attempts + 1):
             delivery: Delivery = await device.send_direct_message(contact, text)
+            flood = delivery.flood
             if delivery.code:
                 codes.append(delivery.code)
             if delivery.acked:
-                return True, codes
+                return True, codes, flood
             if attempt < attempts:
                 self._ctx.log.debug(
                     "chat: DM to %s unacked on try %d/%d; soft-retrying",
@@ -555,7 +561,7 @@ class ChatService:
                     attempt,
                     attempts,
                 )
-        return False, codes
+        return False, codes, flood
 
     async def send_direct(
         self, contact: Contact, text: str, *, on_late_ack: LateAck | None = None
@@ -579,7 +585,7 @@ class ChatService:
             The stored outbound :class:`ChatMessage`. Its ``acked`` shows whether a
             delivery acknowledgement arrived in the wait, until now.
         """
-        acked, codes = await self._deliver_direct(contact, text)
+        acked, codes, flood = await self._deliver_direct(contact, text)
         chat = ChatMessage(
             text=text,
             outbound=True,
@@ -588,13 +594,16 @@ class ChatService:
             peer_name=contact.name,
             acked=acked,
             created_at=utcnow(),
+            flood=flood,
         )
         chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
         if not acked:
             self._await_ack(chat, codes, on_late_ack)
         return chat
 
-    async def resend_direct(self, contact: Contact, message: ChatMessage) -> ChatMessage:
+    async def resend_direct(
+        self, contact: Contact, message: ChatMessage, *, flood: bool = False
+    ) -> ChatMessage:
         """Try again to deliver an unacknowledged direct message, and change it in place.
 
         MeshTerm uses this method to try again a message that was transmitted but never
@@ -605,15 +614,32 @@ class ChatService:
         up to ``preferences.direct_message_soft_retries`` soft retries of its own (refer to
         :meth:`_deliver_direct`).
 
+        The companion keeps one route for each contact, and it replaces the route only when
+        a path return arrives. A route that is no longer valid loses each message with no
+        error (GitHub issue 34). With ``flood`` set, the method first forgets the route
+        (a local action, nothing is transmitted). Thus the retry floods, and the companion
+        learns a new route from the answer. The user must choose this, and the method
+        never does it by itself.
+
         Args:
             contact: The recipient.
             message: The :class:`ChatMessage` that was sent before, to transmit again. The
                 method changes it in place with the new delivery state.
+            flood: Forget the route to the contact before the retry, so that the retry
+                floods the whole mesh.
 
         Returns:
             The same ``message``, with :attr:`~ChatMessage.acked` updated.
         """
-        acked, codes = await self._deliver_direct(contact, message.text)
+        if flood:
+            device = await self._ctx.device()
+            await device.reset_route(contact)
+            # The route in the contact cache is not valid now. The next read gets it again.
+            devstate = getattr(self._ctx, "devstate", None)
+            if devstate is not None:
+                devstate.invalidate_contacts()
+        acked, codes, how = await self._deliver_direct(contact, message.text)
+        message.flood = how
         if message.acked:
             return message  # a late ack for an earlier attempt settled it during this send
         message.acked = acked

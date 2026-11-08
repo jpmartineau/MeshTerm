@@ -23,6 +23,13 @@ password, and a node whose password changed gets the new one in one step.
 
 The CLI cannot ask. Its error for the same silence says how to give the new password
 (:func:`no_reply_error`).
+
+A third cause of the same silence is a stale route (GitHub issue 34). The companion keeps
+one route for each node and replaces it only when a path return arrives. Nothing makes it
+forget a dead route, so each login on that route is lost with no error. When the node has
+a route, the dialog of the silence also offers ``Try by flood``. The button forgets the
+route (nothing is transmitted), and then the one next login floods. The user chooses this
+step, and the flow never floods by itself.
 """
 
 from __future__ import annotations
@@ -39,6 +46,9 @@ if TYPE_CHECKING:
 
 #: The title of each dialog of the login.
 TITLE = "Admin login"
+
+#: The value of the ``Try by flood`` button of :func:`offer_no_reply`.
+RETRY_FLOOD = "flood"
 
 
 async def ask_password(ctx: AppContext, node: Contact, *, why: str) -> str | None:
@@ -155,6 +165,70 @@ async def offer_new_password(ctx: AppContext, node: Contact) -> bool:
     )
 
 
+async def forget_route(ctx: AppContext, device: Device, node: Contact) -> None:
+    """Forget the route that the radio learned to ``node``, so that its next login floods.
+
+    This is a local action on the companion. Nothing goes on the air. The route in the
+    contact cache is not valid after it, so the function also makes the cache read the
+    contacts again. The login that follows is the one transmission.
+
+    Args:
+        ctx: The shared application context.
+        device: The connected device.
+        node: The node whose route to forget.
+    """
+    await device.reset_route(node)
+    devstate = getattr(ctx, "devstate", None)
+    if devstate is not None:
+        devstate.invalidate_contacts()
+
+
+async def offer_no_reply(ctx: AppContext, node: Contact, *, saved: bool) -> object:
+    """Ask what to do after a login got no reply from a node that has a learned route.
+
+    The silence has three causes that MeshTerm cannot tell apart: the node is down, its
+    password changed (or the typed password is wrong), or the route is stale. A flood costs
+    the least to test, because it needs no typing. Thus ``Try by flood`` is the default. It
+    is the one next login, and the user chooses it. The dialog has a maximum of three
+    buttons, so the row fits the dialog of the handhelds.
+
+    Args:
+        ctx: The shared application context (the interactive menu must be running).
+        node: The node that did not answer. It must have a route (``route_hops`` is not
+            ``None``).
+        saved: The password came from the admin store. Then the dialog also offers a new
+            password.
+
+    Returns:
+        :data:`RETRY_FLOOD` for ``Try by flood``, ``True`` for ``New password…``, and a
+        false value to stop.
+    """
+    stale = (
+        "The login went along a route that your radio learned, and a route goes stale "
+        "when the mesh changes. A flood goes around it."
+    )
+    if saved:
+        text = (
+            f"No reply from {node.name} — it may be out of reach, asleep, or busy. Or its "
+            "admin password changed: a node does not answer a wrong password. The saved "
+            f"password is kept until a new one works. {stale}"
+        )
+        buttons: list[tuple[str, object]] = [
+            ("Cancel", None),
+            ("New password…", True),
+            ("Try by flood", RETRY_FLOOD),
+        ]
+        default = 2
+    else:
+        text = (
+            f"No reply from {node.name} — it may be out of reach, or the password is "
+            f"wrong: a node does not answer a wrong password. {stale}"
+        )
+        buttons = [("Cancel", None), ("Try by flood", RETRY_FLOOD)]
+        default = 1
+    return await ctx.ui.dialog(Text(text, style="warn"), buttons, title=TITLE, default=default)
+
+
 async def log_in(
     ctx: AppContext,
     device: Device,
@@ -175,6 +249,11 @@ async def log_in(
     3. After a refusal, or after a silence for a typed password, show why, and stop.
     4. After a silence for a stored password, offer a new password
        (:func:`offer_new_password`). If the user accepts, go back to step 1.
+    5. After a silence from a node that has a learned route, the dialog of step 3 or step 4
+       also offers ``Try by flood`` (:func:`offer_no_reply`). If the user accepts, the flow
+       forgets the route (:func:`forget_route`) and logs in again with the same password.
+       The flow offers this step one time only. A flood that also gets no reply ends in
+       step 3 or step 4 as before.
 
     Args:
         ctx: The shared application context (the interactive menu must be running).
@@ -194,6 +273,7 @@ async def log_in(
     session = ctx.ui.session
     password = ctx.admin_store.get(node)
     saved = password is not None
+    flooded = False
     while True:
         if password is None:
             password = await ask_password(ctx, node, why=why)
@@ -211,6 +291,16 @@ async def log_in(
                 Text(refused_text(node, saved=saved, again=again), style="err"), title=TITLE
             )
             return False
+        if node.route_hops is not None and not flooded:
+            choice = await offer_no_reply(ctx, node, saved=saved)
+            if choice == RETRY_FLOOD:
+                await forget_route(ctx, device, node)
+                flooded = True
+                continue
+            if not choice:
+                return False
+            password, saved = None, False
+            continue
         if not saved:
             await session.message_dialog(
                 Text(no_reply_text(node, again=again), style="warn"), title=TITLE
