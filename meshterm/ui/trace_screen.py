@@ -52,7 +52,9 @@ it to. An action list controls the screen: ↑/↓ select a row, and Enter runs 
   route out and back. Thus, when the route out of such a trace is not the radio's route,
   the row turns green and offers it: ``Use this route for DMs and admin``. The popup then
   has *Use the traced route* and *Use and keep it* first. Nothing interrupts the session:
-  only the row changes.
+  only the row changes. A route that *Probe all* measured is already proved: when the user
+  adopts it, the probe traces become the first traces of the screen, so the row offers the
+  route at once, with no second transmission.
 * **Path width** opens a small dialog, where the user selects the path-hash width for
   each hop: 1, 2, or 4 bytes. A forced hop is addressed by this number of bytes from
   the start of its key. The first value is the routing width of the device. When the
@@ -502,6 +504,7 @@ class TraceScreen(Screen):
         open_trophy_case: Callable[[], Awaitable[None]] | None = None,
         route_row: RouteRow | None = None,
         prove: Callable[[list[TraceResult]], ProvenRoute | None] | None = None,
+        seed_traces: Callable[[str], list[TraceResult]] | None = None,
     ) -> None:
         """Create the screen (nothing transmits until the user runs Trace).
 
@@ -563,6 +566,9 @@ class TraceScreen(Screen):
                 has), or ``None`` for no row.
             prove: Finds the route out that the traces of the screen came home on, for
                 the Device route row. ``None`` offers no traced route.
+            seed_traces: Gives the traces that this session already walked on a spec (the
+                traces of a probe). When the screen adopts that spec, they become its
+                first traces. ``None`` starts each adopted path with no traces.
         """
         super().__init__()
         self.title = f"Trace — {target}" if mode == "target" else "Trace path"
@@ -588,6 +594,7 @@ class TraceScreen(Screen):
         self._open_trophy_case = open_trophy_case
         self._route_row = route_row if mode == "target" else None
         self._prove = prove
+        self._seed_traces = seed_traces
         #: The trophy case disciplines that the current run placed in. The key is the
         #: title of the discipline, so that a run with more than one sample that
         #: improves keeps only its latest ``"Title — score"`` label for each board.
@@ -982,9 +989,13 @@ class TraceScreen(Screen):
                 if spec is not None and spec.strip() != self._path_spec:
                     # A different spec is a different measurement. The aggregates, the
                     # medians for each hop, and the log all belong to the old route.
-                    # Thus the session starts again, as clean as a new screen.
+                    # Thus the session starts again, as clean as a new screen. Only the
+                    # traces that this session already walked on the new spec (a probe)
+                    # stay, because they measured exactly this route.
                     self._path_spec = spec.strip()
                     self._traces.clear()
+                    if self._seed_traces is not None:
+                        self._traces.extend(self._seed_traces(self._path_spec))
                     self._traces_rev += 1
                     self._status = ""
             finally:
@@ -2307,6 +2318,10 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
         text.append(f"  ({outcome.candidate.label})", style="faint")
         return text
 
+    #: The traces that each probe walked, by spec, for the screen to start an adopted route
+    #: with (refer to the seed_traces argument of TraceScreen).
+    probe_traces: dict[str, list[TraceResult]] = {}
+
     async def run_probe(
         candidates: list[ProbeCandidate],
     ) -> list[ProbeOutcome] | None:
@@ -2331,6 +2346,9 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
         dialog.status = f"path 1/{len(candidates)} · one trace each"
 
         def on_result(index: int, done: int, result: TraceResult) -> None:
+            # Keep the trace for its spec. When the user adopts that route, the screen
+            # starts with it (refer to seed_traces), and needs no second transmission.
+            probe_traces.setdefault(candidates[index].spec.strip(), []).append(result)
             dialog.status = f"path {index + 1}/{len(candidates)} · one trace each"
             dialog.last = result
             session.invalidate()
@@ -2704,6 +2722,7 @@ async def _open_session(ctx: AppContext, target: str | None, *, initial_spec: st
         open_trophy_case=_trophy_case_opener(ctx),
         route_row=route_row,
         prove=prove,
+        seed_traces=lambda spec: list(probe_traces.get(spec, [])),
     )
     try:
         await session.run_screen(screen)

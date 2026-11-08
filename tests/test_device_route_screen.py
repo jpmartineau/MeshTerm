@@ -292,3 +292,54 @@ async def test_trace_target_has_the_row_and_hands_it_the_traced_route() -> None:
     await asyncio.sleep(0)
     assert opened == [ProvenRoute(("27d4",), 1, 1, 2.0)]
     assert len(screen._traces) == 1  # the popup changes no path of the screen
+
+
+async def test_an_adopted_probe_route_starts_with_its_probe_traces() -> None:
+    """Adopting a probed route keeps its probe trace, so the row offers it at once."""
+    import asyncio
+
+    from meshterm.ui.device_route_screen import ProvenRoute
+    from meshterm.ui.trace_screen import TraceScreen
+    from tests.test_live_screens import _FakeSession, _trace
+
+    probed = _trace(4.0, 1.0)
+    adopted = "3d63,f2c2,3d63"
+
+    async def flow(current):  # noqa: ANN001, ANN202
+        return current
+
+    async def explore(current):  # noqa: ANN001, ANN202
+        return adopted
+
+    async def trace(spec, on_trace):  # noqa: ANN001, ANN202
+        raise AssertionError("an adopted probe route needs no new trace")
+
+    def prove(traces: list) -> ProvenRoute | None:
+        home = [t for t in traces if t.success]
+        return ProvenRoute(("3d63",), len(home), len(traces)) if home else None
+
+    screen = TraceScreen(
+        "Alice",
+        device_label="Us",
+        device_hash="aabb" + "00" * 30,
+        resolve=lambda label: label,
+        session=_FakeSession(),
+        trace=trace,
+        compose_path=flow,
+        explore=explore,
+        pick_width=flow,
+        pick_samples=flow,
+        width_bytes=lambda: 2,
+        sample_count=lambda: 1,
+        pace_s=0.0,
+        route_row=_row(None),
+        prove=prove,
+        seed_traces=lambda spec: [probed] if spec == adopted else [],
+    )
+    screen._index = screen._actions.index("explore")
+    screen.handle("enter")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert screen._traces == [probed]
+    assert screen.proven() == ProvenRoute(("3d63",), 1, 1)
+    assert screen._actions[screen._index] == "trace"  # the highlight moved, as after Explore
