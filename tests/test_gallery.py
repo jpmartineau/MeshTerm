@@ -1366,6 +1366,64 @@ def _outbound_composer(cols: int, rows: int) -> Screen:
     )
 
 
+def _device_route_env():  # noqa: ANN202 - a type of the module under test
+    """The Device route popup for Alice: a learned route, and a kept route that is skipped."""
+    from datetime import timedelta
+
+    from meshterm.core.outbound_store import SOURCE_SITE, RouteOwner
+    from meshterm.services.device_routes import ORIGIN_LEARNED, RouteStatus
+    from meshterm.ui.device_route_screen import RouteEnv
+
+    env = _outbound_env()
+    topo = env.topology
+    target = "f2c24f54551e"
+    outbound = (("3d63c6429436",),)
+    route_env = RouteEnv(
+        contact=env.contacts[1],
+        label="Alice",
+        target=target,
+        topology=topo,
+        self_key=env.identity.key,
+        width_bytes=1,
+        resolve=lambda hop: None,
+        scenarios=topo.scenarios(target, device_route=("3d63c6429436",), outbound=outbound),
+        suggested=topo.suggested(target, outbound=outbound),
+        outbound=outbound,
+    )
+    status = RouteStatus(
+        hops=("3d",),
+        origin=ORIGIN_LEARNED,
+        changed_at=utcnow() - timedelta(minutes=5),
+        kept=("3d63c6429436", "9a9a"),
+        owner=RouteOwner(SOURCE_SITE, "A-site-named-24-chars-xx"),
+        skipped_since=utcnow() - timedelta(days=2),
+    )
+    return route_env, status
+
+
+def _device_route_page(cols: int, rows: int) -> Screen:
+    """The first page of the Device route popup: the route now, the kept route, the actions."""
+    from meshterm.ui.device_route_screen import _action_rows, _status_rows
+    from meshterm.ui.tui.select import Separator
+
+    env, status = _device_route_env()
+    items = [*_status_rows(env, status), Separator(" "), *_action_rows(status)]
+    return SelectScreen("Device route — Alice", items, filterable=False)
+
+
+def _device_route_picker(cols: int, rows: int) -> Screen:
+    """The picker page of the Device route popup: the suggested route first, then Compose."""
+    from meshterm.ui.device_route_screen import _picker_rows
+
+    env, status = _device_route_env()
+    return SelectScreen(
+        "Set the route — Alice",
+        _picker_rows(env, status),
+        prompt="The radio sends to the contact on this route:",
+        filterable=False,
+    )
+
+
 class _CourierStubDevice:
     async def get_contacts(self) -> list:
         return []
@@ -1952,6 +2010,8 @@ _ENTRIES: list[_Entry] = [
     _Entry("message_paths_sent_scope", _message_paths_sent_scope),
     _Entry("remote_cli", _remote_cli),
     _Entry("path_composer", _path_composer),
+    _Entry("device_route_page", _device_route_page),
+    _Entry("device_route_picker", _device_route_picker),
     _Entry("outbound_composer", _outbound_composer),
     _Entry("outbound_page", _outbound_page),
     _Entry("outbound_site", _outbound_site),

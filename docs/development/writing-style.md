@@ -186,6 +186,10 @@ and in quoted text.
 | outbound path | A path that starts at our node and goes out into the mesh, one or more hops long. The user trusts it for the first hops of a route, because the user knows which way out works | outbound leg (for this: an outbound leg is the outbound half of a trace) |
 | site | A name for where the user takes the computer (`Home`, `Foulab`), with its outbound paths in order. One site is active | profile (for this: a profile is a connection alias in `config.toml`) |
 | fixed device | A companion that never moves. It keeps its own outbound paths, and the active site does not apply to it | |
+| device route | The route that the radio holds for one contact: the relays that it sends to the contact through. The radio learns it from a path return, and replaces it with each new one | out path, contact path (for this) |
+| kept route | A device route that the user chose and told MeshTerm to keep. MeshTerm writes it back each time that the radio replaces it. It belongs to the active site or to a fixed device | pinned route |
+| saved route | A device route that the radio learned at a site. MeshTerm saves it when the user changes site, and writes it back when the user returns | |
+| path discovery | One flood request to a contact. The answer tells the route in each direction, and the device route does not change | |
 | via | The prefix for the relay chain of a packet or a message | |
 | location | The coordinates (latitude and longitude) that a node advertises | coordinates (alone) |
 | place | The named area nearest the location of a node: a neighbourhood, a village, a town, or a peak. It has a fine part and a coarse part (`Villeray, Montréal`) | location name, locality |

@@ -117,6 +117,10 @@ from ..core.places import SOURCE_USER
 from ..platforms import Platform, on_platform
 from ..services.clock_offsets import node_offset, room_posts_blocked
 from . import menus
+from .device_route_screen import ACTION as DEVICE_ROUTE_ACTION
+from .device_route_screen import ICON as DEVICE_ROUTE_ICON
+from .device_route_screen import RouteEnv, open_device_route
+from .device_route_screen import row_label as device_route_label
 from .mapcanvas import RGB
 from .marks import MANAGED_ICON, SELF_MARK
 from .minimap import MiniMap
@@ -503,6 +507,7 @@ class NodeDetailScreen(Screen):
         routes: _RoutesView | None = None,
         info_actions: list[_Action] | None = None,
         trace_action: _Action | None = None,
+        route_action: _Action | None = None,
         mark: Text | None = None,
         place_row: Callable[[], Text | None] | None = None,
     ) -> None:
@@ -534,6 +539,9 @@ class NodeDetailScreen(Screen):
             trace_action: The ``Trace — auto route …`` action of the Routes tab, or
                 ``None``. It is shown only when there are no routes to list. When routes
                 are listed, Enter on a route row starts the trace.
+            route_action: The ``Device route · …`` row of the Routes tab, after the routes,
+                or ``None`` when the radio has no contact for the node (refer to
+                :mod:`meshterm.ui.device_route_screen`).
             place_row: Gives the value of the ``place`` vital, or ``None`` when there is no
                 place. The page asks at each paint, because the place finder can answer
                 after the page opened (refer to :mod:`meshterm.services.places`).
@@ -553,6 +561,7 @@ class NodeDetailScreen(Screen):
         self._routes = routes
         self._info_actions = info_actions or []
         self._trace_action = trace_action
+        self._route_action = route_action
         #: The width in cells of the icon lane of the action rows. It is measured one time
         #: over each mark that this page can draw. Thus a one-cell ``🗑`` gets padding to the
         #: width of its two-cell siblings, and each label starts in the same cell. It is zero
@@ -708,7 +717,8 @@ class NodeDetailScreen(Screen):
     def _measure_icon_lane(self) -> int:
         """The icon lane of the action rows, measured over each mark that is now on the page."""
         trace = [self._trace_action] if self._trace_action else []
-        return menus.icon_lane(action.glyph for action in (*self._info_actions, *trace))
+        route = [self._route_action] if self._route_action else []
+        return menus.icon_lane(action.glyph for action in (*self._info_actions, *trace, *route))
 
     def replace_info_row(self, label: str, value: Text) -> None:
         """Replace the value of one vital in place: the regions row, after the repeater answered.
@@ -759,6 +769,33 @@ class NodeDetailScreen(Screen):
             if key is not None and key in (was, family.get(was or "")):
                 self._row_index = index
                 break
+
+    def replace_routes(
+        self,
+        routes: _RoutesView | None,
+        *,
+        route_action: _Action | None,
+        trace_action: _Action | None,
+    ) -> None:
+        """Replace the Routes tab in place, after the device route changed.
+
+        The routes are data (the device route tags one of them, and it leads the
+        suggestions), so the list refreshes and the page stays. The highlight stays on the
+        ``Device route`` row, because the user comes back to the row that opened the popup.
+        """
+        self._routes = routes
+        self._route_action = route_action
+        self._trace_action = trace_action
+        self._stage_memo = None
+        self._route_sel = 0
+        self._icon_lane = self._measure_icon_lane()
+        focus = self._focusables()
+        for index, (_kind, payload) in enumerate(focus):
+            if payload is route_action and route_action is not None:
+                self._row_index = index
+                break
+        else:
+            self._row_index = min(self._row_index, max(0, len(focus) - 1))
 
     def handle(self, action: str, data: str = "") -> None:
         """Answer one key press on the page.
@@ -879,6 +916,8 @@ class NodeDetailScreen(Screen):
             focus.extend(("path", i) for i in range(len(self._routes.routes)))
             if not self._routes.routes and self._trace_action is not None:
                 focus.append(("action", self._trace_action))
+            if self._route_action is not None:
+                focus.append(("action", self._route_action))
         elif tab is not None and tab.kind == "info":
             focus.extend(("action", a) for a in self._info_actions)
         return focus
@@ -1856,6 +1895,84 @@ async def open_node_detail(
     trace_action: _Action | None = None
     if not you and node_id and not (routes_view is not None and routes_view.routes):
         trace_action = _Action("trace", "🎯", "", "Trace — auto route …")
+    # -- the device route: the route that the radio holds for this contact, after the routes
+    # (refer to meshterm.ui.device_route_screen). Only a contact that the radio has gets it,
+    # because the radio holds a route only for its own contacts.
+    route_env: RouteEnv | None = None
+    route_action: _Action | None = None
+    if (
+        routes_view is not None
+        and contact is not None
+        and whole_key
+        and canonical_target is not None
+        and getattr(ctx, "routes", None) is not None
+        and not _is_archived(ctx, contact, self_key)
+    ):
+        route_env = RouteEnv(
+            contact=contact,
+            label=label,
+            target=canonical_target,
+            topology=topo,
+            self_key=dev_pub,
+            width_bytes=width_bytes,
+            resolve=resolve,
+            scenarios=list(scenarios),
+            suggested=suggested,
+            outbound=outbound,
+        )
+
+    def device_route_row(current: Contact) -> _Action:
+        """The row of the device route, for what the radio holds now."""
+        status = ctx.routes.status(
+            current, device_key=dev_pub, topo=topo, silent_before=silent_before
+        )
+        return _Action(DEVICE_ROUTE_ACTION, DEVICE_ROUTE_ICON, "", device_route_label(status))
+
+    if route_env is not None:
+        route_action = device_route_row(route_env.contact)
+
+    async def refresh_device_route() -> None:
+        """Read the contact again after a change, and draw the Routes tab again in place."""
+        assert route_env is not None
+        try:
+            fresh = await ctx.devstate.contacts()
+        except Exception:  # noqa: BLE001 - keep the old snapshot, the row still opens
+            fresh = []
+        wanted = route_env.contact.public_key.lower()
+        current = next((c for c in fresh if c.public_key.lower() == wanted), route_env.contact)
+        route_env.contact = current
+        new_route = (
+            tuple(topo.canonical(h) or h for h in current.route_hops)
+            if current.route_hops is not None
+            else None
+        )
+        route_env.scenarios = topo.scenarios(
+            route_env.target,
+            device_route=new_route,
+            outbound=outbound,
+            silent_before=silent_before,
+        )
+        view = _routes_view(
+            topo,
+            route_env.scenarios,
+            suggested,
+            new_route,
+            canonical_target,
+            target_hash,
+            width_bytes,
+            resolve=resolve,
+            type_of=make_node_type_resolver(contacts),
+            key_of=make_name_key_resolver(contacts, stored_names, heard=named_at),
+            style=route_graph_style,
+            self_name=self_name,
+            node_label=label,
+            name_key=key,
+            node_known=name is not None,
+            hash_bytes=prefix_bytes,
+        )
+        trace = None if view.routes else _Action("trace", "🎯", "", "Trace — auto route …")
+        screen.replace_routes(view, route_action=device_route_row(current), trace_action=trace)
+
     title = f"Node — {label}" if not you else f"Node — {label} (you)"
     # Whether the visit ended with a delete of the contact. This tells the caller to build
     # its list again.
@@ -1878,6 +1995,7 @@ async def open_node_detail(
         routes=routes_view,
         info_actions=info_actions,
         trace_action=trace_action,
+        route_action=route_action,
         mark=mark,
         place_row=place_row,
     )
@@ -1888,6 +2006,10 @@ async def open_node_detail(
                 break
             if action == "trace":
                 await open_trace(ctx, name or key, initial_spec=screen.selected_spec())
+            elif action == DEVICE_ROUTE_ACTION:
+                assert route_env is not None  # offered only then
+                if await open_device_route(ctx, route_env):
+                    await refresh_device_route()
             elif action == "map":
                 if markers:
                     # Open the map centred on this node (the same place that the inline
