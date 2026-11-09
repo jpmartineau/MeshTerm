@@ -3737,8 +3737,8 @@ def _capture_traces(monkeypatch) -> list:  # noqa: ANN001
 
     calls: list = []
 
-    async def open_trace(ctx, target, *, initial_spec="", label=None):  # noqa: ANN001, ANN202
-        calls.append(("target", target, initial_spec, label))
+    async def open_trace(ctx, target, *, initial_spec="", label=None, node_type=None):  # noqa: ANN001, ANN202
+        calls.append(("target", target, initial_spec, label, node_type))
         return 0
 
     async def open_trace_path(ctx, spec=""):  # noqa: ANN001, ANN202
@@ -3759,7 +3759,7 @@ def test_a_traced_route_opens_trace_target_under_the_contacts_name(monkeypatch) 
     alice = Contact(name="Alice", public_key="d4e5f6a7" + "0" * 56, key_prefix="d4e5f6a7")
     walk = TraceWalk("d4e5f6a7", ("cc", "bb"))
     asyncio.run(_trace_walk(_trace_ctx(), walk, contacts=[alice], label="Alice"))
-    assert calls == [("target", "Alice", "cc,bb,d4,bb,cc", "Alice")]
+    assert calls == [("target", "Alice", "cc,bb,d4,bb,cc", "Alice", None)]
 
 
 def test_a_traced_route_to_a_stranger_opens_on_its_key_with_its_name(monkeypatch) -> None:  # noqa: ANN001
@@ -3770,15 +3770,34 @@ def test_a_traced_route_to_a_stranger_opens_on_its_key_with_its_name(monkeypatch
     calls = _capture_traces(monkeypatch)
     walk = TraceWalk("A3A3A3A3", ("cc",))
     asyncio.run(_trace_walk(_trace_ctx(), walk, contacts=[], label="bob_caribou"))
-    assert calls == [("target", "a3a3a3a3", "cc,a3,cc", "bob_caribou")]
+    assert calls == [("target", "a3a3a3a3", "cc,a3,cc", "bob_caribou", None)]
 
 
-def test_a_walk_with_no_target_opens_trace_path(monkeypatch) -> None:  # noqa: ANN001
+def test_a_loop_opens_trace_path(monkeypatch) -> None:  # noqa: ANN001
     """A channel message that came back to our node walks its relays again in Trace path."""
     from meshterm.services.message_paths import TraceWalk
     from meshterm.ui.chat import _trace_walk
 
     calls = _capture_traces(monkeypatch)
-    walk = TraceWalk(None, ("aabb", "ccdd"))
+    walk = TraceWalk(None, ("aabb", "ccdd"), loop=True)
     asyncio.run(_trace_walk(_trace_ctx(mode=1), walk, contacts=[], label=None))
     assert calls == [("path", "aabb,ccdd")]
+
+
+def test_a_sender_with_no_key_opens_trace_target_under_its_name(monkeypatch) -> None:  # noqa: ANN001
+    """A channel sender that no key names is still the target, and the walk turns at its relay.
+
+    Only a companion sends channel text, and a companion does not relay a trace. Thus the
+    screen is Trace target on the name of the sender, with the companion rules: the walk
+    goes out to the relay that heard the sender, and back.
+    """
+    from meshterm.core.models import NODE_TYPE_CHAT
+    from meshterm.services.message_paths import TraceWalk
+    from meshterm.ui.chat import _trace_walk
+
+    calls = _capture_traces(monkeypatch)
+    walk = TraceWalk(None, ("3d", "51", "1b", "40"))
+    asyncio.run(
+        _trace_walk(_trace_ctx(), walk, contacts=[], label="Lindsay", node_type=NODE_TYPE_CHAT)
+    )
+    assert calls == [("target", "Lindsay", "3d,51,1b,40,1b,51,3d", "Lindsay", NODE_TYPE_CHAT)]

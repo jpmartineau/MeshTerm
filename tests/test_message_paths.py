@@ -425,11 +425,12 @@ def test_a_received_message_is_traced_back_to_its_sender() -> None:
     assert walk == TraceWalk("5e", ("cc", "bb", "aa"))
 
 
-def test_a_sender_with_no_key_is_traced_to_the_first_relay_and_back() -> None:
-    """With no key for the sender, the trace turns back at the first relay."""
+def test_a_sender_with_no_key_is_still_the_end_of_the_walk() -> None:
+    """With no key for the sender, the walk still goes to the sender, not around a loop."""
     arrival = Arrival(when=utcnow(), hops=("aa", "bb", "cc"), snr=1.0)
     walk = trace_walk(arrival, outbound=False, origin_key=None, far_key=None)
-    assert walk == TraceWalk(None, ("cc", "bb", "aa", "bb", "cc"))
+    assert walk == TraceWalk(None, ("cc", "bb", "aa"))
+    assert walk is not None and not walk.loop
     direct = Arrival(when=utcnow(), hops=(), snr=1.0)
     assert trace_walk(direct, outbound=False, origin_key=None, far_key=None) is None
     # A sender that we heard direct and that has a key: a trace with no relays.
@@ -447,7 +448,7 @@ def test_a_sent_channel_message_walks_its_loop_again() -> None:
     """Our broadcast came back to our node, so its relays are the full walk."""
     arrival = Arrival(when=utcnow(), hops=("aa", "bb"), snr=1.0)
     assert trace_walk(arrival, outbound=True, origin_key=None, far_key=None) == TraceWalk(
-        None, ("aa", "bb")
+        None, ("aa", "bb"), loop=True
     )
 
 

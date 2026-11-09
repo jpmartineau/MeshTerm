@@ -477,15 +477,20 @@ class TraceWalk:
     """The trace that walks the route of one arrival again, from our node.
 
     Attributes:
-        target: The key of the node at which the trace turns back home (a *Trace target*
-            session), or ``None`` for a walk with no target (a *Trace path* session).
-        hops: With a target: the leg from our node out to the target, without the two
-            ends. The trace comes back on the mirror of this leg. With no target: the full
+        target: The key of the node that the route goes to (a *Trace target* session), or
+            ``None`` when no key names it. A walk to a node with no key can turn only at
+            the last relay of the route, because no hash can address the node.
+        hops: For a walk to a node: the route from our node out to the node, without the
+            two ends. The trace turns at the node, or at the last relay before a node that
+            does not relay, and comes back on the mirror of the route. For a loop: the full
             walk, which ends at a node that our node heard.
+        loop: Whether the route comes back to our node (a sent channel message), and not to
+            a node (a *Trace path* session).
     """
 
     target: str | None
     hops: tuple[str, ...]
+    loop: bool = False
 
 
 def trace_walk(
@@ -506,9 +511,9 @@ def trace_walk(
       there (``far_key``). A channel message came back to our node, and the relays are the
       full walk: the last relay is a node that our node heard.
     * **A message that our node received** ends at our node. The trace walks the relays
-      in the reverse order, back to the sender (``origin_key``), and turns back there.
-      When no key names the sender, the trace turns back at the first relay, the last
-      node of the route that MeshTerm can address.
+      in the reverse order, back to the sender (``origin_key``). When no key names the
+      sender, the walk still goes to the sender, and the caller names it. Such a walk can
+      turn only at the first relay of the message, the relay that heard the sender.
 
     A direct-routed copy gives no trace. Its hops are the part of a route that the packet
     still had to go through, not where it went. Thus a trace on them starts at a node that
@@ -531,11 +536,9 @@ def trace_walk(
     if outbound:
         if far_key:
             return TraceWalk(far_key, hops)
-        return TraceWalk(None, hops) if hops else None
+        return TraceWalk(None, hops, loop=True) if hops else None
     back = tuple(reversed(hops))
     if origin_key:
         return TraceWalk(origin_key, back)
-    if not hops:
-        return None
-    # Out to the first relay, and back on the same relays (refer to render_forced_spec).
-    return TraceWalk(None, back + hops[1:])
+    # With no key and no relay, the walk has no hop at which it can turn.
+    return TraceWalk(None, back) if hops else None

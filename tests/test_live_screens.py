@@ -295,6 +295,44 @@ def test_trace_screen_names_the_relay_where_a_companions_walk_turns() -> None:
     assert screen._actions[screen._index] == "trace"  # a turn: Enter traces at once
 
 
+def test_trace_screen_for_a_sender_known_by_name_only_has_no_explore_row() -> None:
+    """A target with no key has no node in the graph to rank routes to, so Explore is gone.
+
+    The screen still opens armed on the walk that turns at the relay of the sender, and the
+    groups of rows keep their gaps.
+    """
+    keyed, _ = _trace_screen(initial_spec="3d63,f2c2,3d63", relays=False)
+    assert "explore" in keyed._actions  # a target with a key keeps it
+    bare = TraceScreen(
+        "Lindsay",
+        mode="target",
+        device_label="Us",
+        device_hash="aabb" + "00" * 30,
+        resolve=lambda label: label,
+        session=_FakeSession(),
+        trace=None,  # type: ignore[arg-type]
+        compose_path=None,  # type: ignore[arg-type]
+        explore=None,
+        pick_width=None,  # type: ignore[arg-type]
+        pick_samples=None,  # type: ignore[arg-type]
+        width_bytes=lambda: 2,
+        sample_count=lambda: 1,
+        pace_s=0.0,
+        previous=None,
+        auto_spec=lambda: "",
+        initial_spec="3d63,f2c2,3d63",
+        relays=False,
+    )
+    bare.note_viewport(40)
+    assert bare.title == "Trace — Lindsay"
+    assert bare._actions == ("compose", "width", "samples", "trace")
+    assert bare._actions[bare._index] == "trace"  # armed: Enter traces at once
+    lines = _plain(bare.render_body(72)).splitlines()
+    assert "Lindsay can't relay a trace, so the trace turns at f2c2" in " ".join(lines)
+    compose = next(i for i, line in enumerate(lines) if "Compose" in line)
+    assert lines[compose + 1].strip() == ""  # the build group ends on Compose
+
+
 def test_trace_screen_wraps_the_turn_line_under_the_route_lane() -> None:
     """The line is a sentence, so it wraps at 53 cells, and no line of the page is wider."""
     from rich.cells import cell_len

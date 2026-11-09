@@ -30,6 +30,7 @@ from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
 from ..core.models import (
+    NODE_TYPE_CHAT,
     ChatMessage,
     Contact,
     Conversation,
@@ -2107,15 +2108,19 @@ async def _trace_walk(
     *,
     contacts: list[Contact],
     label: str | None,
+    node_type: int | None = None,
 ) -> None:
     """Open the trace screen armed on the walk of one arrival, and run it until the user leaves.
 
     The screen opens idle, armed on the route. Nothing transmits until the user starts a
-    trace there. A walk with a target opens *Trace target*. The spec is the leg out to the
-    target, the target, and the mirror of the leg back
-    (:func:`~meshterm.services.topology.render_forced_spec`). A walk with no target opens
-    *Trace path* on the walk as given. The width of each hop is the routing width of the
-    device, collapsed to what a trace can encode, the same as the trace screen uses.
+    trace there. A walk to a node opens *Trace target* on that node. Thus the rules for a
+    target apply: a node that does not relay a trace (a companion) is not the turn of the
+    walk, and the walk turns at the last relay before it (refer to
+    :func:`~meshterm.core.models.relays_traces`). The spec is the route out, the turn, and
+    the mirror of the route back (:func:`~meshterm.services.topology.render_forced_spec`).
+    A loop opens *Trace path* on the walk as given. The width of each hop is the routing
+    width of the device, collapsed to what a trace can encode, the same as the trace
+    screen uses.
 
     Args:
         ctx: The shared application context.
@@ -2124,7 +2129,11 @@ async def _trace_walk(
         contacts: The contacts of the device. A target that is a contact opens under the
             name of that contact, the same as from its node page. Thus the history of its
             traces stays in one place.
-        label: The name of the target node, for a target that is not a contact.
+        label: The name of the target node, for a target that is not a contact. A walk to
+            a node with no key opens under this name, so it must have one.
+        node_type: The type of the target, when the caller knows it from the message (the
+            sender of channel text is a companion). The screen uses it when MeshTerm has no
+            stored type for the target.
     """
     from ..services.topology import render_custom_spec, render_forced_spec
     from .trace_screen import collapse_trace_width, open_trace, open_trace_path
@@ -2133,8 +2142,20 @@ async def _trace_walk(
         width = collapse_trace_width(int(await ctx.devstate.path_hash_mode()))
     except Exception:  # noqa: BLE001 - an optional read. The 1-byte default always works.
         width = 1
-    if walk.target is None:
+    if walk.loop:
         await open_trace_path(ctx, render_custom_spec(walk.hops, width))
+        return
+    if walk.target is None:
+        assert label, "a walk to a node with no key opens under its name"
+        # No hash addresses a node with no key, so the walk turns at the last relay of the
+        # route. The caller offers such a walk only for a node that does not relay.
+        await open_trace(
+            ctx,
+            label,
+            initial_spec=render_custom_spec((*walk.hops, *reversed(walk.hops[:-1])), width),
+            label=label,
+            node_type=node_type,
+        )
         return
     key = walk.target.lower()
 
@@ -2149,6 +2170,7 @@ async def _trace_walk(
         contact.name if contact is not None else key,
         initial_spec=render_forced_spec(walk.hops, key, width),
         label=label,
+        node_type=node_type,
     )
 
 
@@ -2294,11 +2316,20 @@ async def _make_paths_presenter(
             far_key = None
         else:
             origin_key, far_key = peer_key, None
+        # Only a companion sends channel text. Thus the sender of a channel message does
+        # not relay a trace, also when MeshTerm never heard its advert.
+        sender_type = NODE_TYPE_CHAT if conversation.is_channel and not message.outbound else None
 
         def walk_of(arrival: Arrival) -> TraceWalk | None:
-            return trace_walk(
+            walk = trace_walk(
                 arrival, outbound=message.outbound, origin_key=origin_key, far_key=far_key
             )
+            # A walk to a sender with no key turns at its last relay. That is correct only
+            # for a node that does not relay, and the screen must have a name to show.
+            if walk is not None and walk.target is None and not walk.loop:
+                if sender_type is None or not source:
+                    return None
+            return walk
 
         screen = MessagePathsScreen(
             message,
@@ -2326,6 +2357,8 @@ async def _make_paths_presenter(
                 walk = walk_of(chosen)
                 if walk is not None:
                     label = destination if message.outbound else source
-                    await _trace_walk(ctx, walk, contacts=contacts, label=label or None)
+                    await _trace_walk(
+                        ctx, walk, contacts=contacts, label=label or None, node_type=sender_type
+                    )
 
     return present

@@ -555,7 +555,8 @@ class TraceScreen(Screen):
                 rows and for the number of traces that one Trace action runs.
             explore: Opens the scenario browser and probe flow over this screen (target
                 mode only). Resolves to an adopted spec, or to ``None`` to keep the
-                current spec.
+                current spec. ``None`` leaves out the Explore row (a target that is known
+                by name only).
             pace_s: The cooldown that sleeps between the traces of a run with more than
                 one sample. Thus a sample session is never a burst for the repeaters.
             previous: The most recent stored trace, if one exists. Its route is the
@@ -666,7 +667,12 @@ class TraceScreen(Screen):
         # act in target mode (with no path, the device routes), and in path mode when a
         # path is available. A path walk with no path has nothing to trace, so there the
         # highlight starts on Compose (GitHub #29: Enter then opens the composer).
-        actions = ["compose", "explore"] if mode == "target" else ["compose", "reverse"]
+        # A target that is known by name only has no Explore (the session gives none).
+        actions = ["compose"]
+        if mode != "target":
+            actions.append("reverse")
+        elif explore is not None:
+            actions.append("explore")
         if self._route_row is not None:
             actions.append("route")
         actions += ["width", "samples", "trace"]
@@ -1153,11 +1159,10 @@ class TraceScreen(Screen):
             if selected:
                 self._cursor = len(lines)
             lines.append(render_to_ansi(text, width))
-            # Put a gap before the next group: after the build-path group (the Device
-            # route row when there is one, else Explore in target mode or Reverse in path
-            # mode) and after the trace-settings group.
-            closes = ("route",) if self._route_row is not None else ("explore", "reverse")
-            if key in (*closes, "samples"):
+            # Put a gap before the next group: after the build-path group (its last row
+            # is the row before Width) and after the trace-settings group.
+            closes = self._actions[self._actions.index("width") - 1]
+            if key in (closes, "samples"):
                 lines.append("")
         # The results are page, not a list window of their own. Nothing highlights them.
         # Thus a private list window hides its rows from the arrows, and gives the frame
@@ -1754,7 +1759,12 @@ def _scenario_detail(scenario: Any) -> Text:
 
 
 async def open_trace(
-    ctx: AppContext, target: str, *, initial_spec: str = "", label: str | None = None
+    ctx: AppContext,
+    target: str,
+    *,
+    initial_spec: str = "",
+    label: str | None = None,
+    node_type: int | None = None,
 ) -> int:
     """Open the live *Trace target* screen for ``target``, and run it until the user leaves.
 
@@ -1774,6 +1784,9 @@ async def open_trace(
         label: The name that the screen shows for a target that is not a contact (the
             Message paths dialog gives the name of the sender with its key). ``None``
             shows the target as given. A contact always shows its own name.
+        node_type: The type of the target, when the caller knows it and MeshTerm possibly
+            has no stored type (the sender of channel text is a companion). The type of a
+            contact, or of the last advert of the node, comes first.
 
     Returns:
         The number of traces that ran while the screen was open.
@@ -1781,7 +1794,9 @@ async def open_trace(
     Raises:
         RuntimeError: If called outside the interactive menu (no full-screen session).
     """
-    return await _open_session(ctx, target, initial_spec=initial_spec, label=label)
+    return await _open_session(
+        ctx, target, initial_spec=initial_spec, label=label, node_type=node_type
+    )
 
 
 async def open_trace_path(ctx: AppContext, spec: str = "") -> int:
@@ -1810,7 +1825,12 @@ async def open_trace_path(ctx: AppContext, spec: str = "") -> int:
 
 
 async def _open_session(
-    ctx: AppContext, target: str | None, *, initial_spec: str = "", label: str | None = None
+    ctx: AppContext,
+    target: str | None,
+    *,
+    initial_spec: str = "",
+    label: str | None = None,
+    node_type: int | None = None,
 ) -> int:
     """Connect and run one live trace session (the two features share this code).
 
@@ -1834,9 +1854,12 @@ async def _open_session(
             screen opens armed, instead of idle on the history. *Trace this path* in the
             trophy case gives it. In target mode, it arms only when the target can be
             addressed (a contact or a hex key), because a forced path must turn at a real
-            hash. The Node detail screen and the Message paths dialog give it there.
+            hash, or when the target does not relay, because then the walk turns at the
+            last relay. The Node detail screen and the Message paths dialog give it there.
         label: The name to show for a target that is not a contact. ``None`` shows the
             target as given.
+        node_type: The type of the target, for a target with no stored type (refer to
+            :func:`open_trace`).
 
     Returns:
         The number of traces that ran while the screen was open.
@@ -1895,8 +1918,9 @@ async def _open_session(
     # The target as a hash that can be addressed: the full key of a known contact, or
     # the typed hex prefix. An unknown target that is not hex can still be traced with
     # device routing. But to compose or explore, a destination hash is necessary on
-    # which to pin the path. A path walk has no target: each target_* stays None, and
-    # the composer runs with a route by hand.
+    # which to pin the path, except for a target that does not relay (refer to by_name
+    # below). A path walk has no target: each target_* stays None, and the composer runs
+    # with a route by hand.
     target_contact: Contact | None = None
     target_hash: str | None = None
     target_label: str | None = None
@@ -1921,12 +1945,18 @@ async def _open_session(
 
     # Whether the target relays a trace (refer to relays_traces). A contact gives its type.
     # A node that is not a contact (the sender of a message, opened from Message paths)
-    # gives the type of its last advert that MeshTerm heard. A node with no known type is
-    # traced itself, as before.
+    # gives the type of its last advert that MeshTerm heard, or else the type that the
+    # caller knows. A node with no known type is traced itself, as before.
     target_type = target_contact.node_type if target_contact is not None else None
     if target_type is None and target_hash is not None and target_contact is None:
         target_type = ctx.repo.node_type(target_hash[:12])
+    if target_type is None:
+        target_type = node_type
     target_relays = mode == "path" or relays_traces(target_type)
+    # A target with no hash that does not relay (the sender of a channel message with no
+    # known key): each walk to it turns at the last relay, so no walk has to address it.
+    # Only the evidence of its route is not there, because the graph keeps nodes by key.
+    by_name = mode == "target" and target_hash is None and not target_relays
 
     def fresh_topology() -> MeshTopology:
         """Build the evidence graph from all the data that is stored now and on the device."""
@@ -2141,7 +2171,7 @@ async def _open_session(
         composer again exactly where the user was (the same hops and insertion slot,
         with refreshed suggestions).
         """
-        if mode == "target" and target_hash is None:
+        if mode == "target" and target_hash is None and not by_name:
             await unaddressable()
             return None
         topo = fresh_topology()
@@ -2729,7 +2759,9 @@ async def _open_session(
         session=session,
         trace=trace_once,
         compose_path=compose,
-        explore=explore if mode == "target" else None,
+        # Explore ranks the routes to a node in the graph, which keeps nodes by key. Thus a
+        # target that is known by name only has no Explore row.
+        explore=explore if mode == "target" and not by_name else None,
         pick_width=pick_width,
         pick_samples=pick_samples,
         width_bytes=lambda: width_bytes,
@@ -2741,8 +2773,10 @@ async def _open_session(
         # A spec from the caller arms the two modes: the stored route of a path walk, or
         # the suggested best path that the Node detail screen gives to a target trace. In
         # target mode, it arms only when the target can be addressed, because a forced
-        # path must end at a real hash.
-        initial_spec=initial_spec if (mode == "path" or target_hash is not None) else "",
+        # path must end at a real hash, or when the walk turns before the target.
+        initial_spec=(
+            initial_spec if (mode == "path" or target_hash is not None or by_name) else ""
+        ),
         open_trophy_case=_trophy_case_opener(ctx),
         route_row=route_row,
         prove=prove,

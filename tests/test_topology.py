@@ -1290,3 +1290,22 @@ def test_composer_for_a_target_that_does_not_relay_turns_at_the_last_hop() -> No
     assert screen._walk_nodes() == ["3d63c6429436", "27d4396a2967", "3d63c6429436"]
     assert "Far" not in screen._route_preview().text().plain
     assert _composer(_topo(), relays=False)._spec() == ""  # no relay: nothing to walk
+
+
+def test_composer_for_a_target_known_by_name_only_still_mirrors_the_route() -> None:
+    """A sender with no key is target mode by its label: the route mirrors, with no Auto row."""
+    screen = PathComposerScreen(
+        device_label="Us",
+        device_hash=US + "0" * 52,
+        topology=_topo(),
+        width_bytes=1,
+        target_label="Lindsay",
+        target_relays=False,
+        hops=["3d63c6429436", "27d4396a2967"],
+    )
+    assert screen.title == "Compose path — Lindsay"
+    assert screen._spec() == "3d,27,3d"
+    assert screen._walk_nodes() == ["3d63c6429436", "27d4396a2967", "3d63c6429436"]
+    actions = [payload for kind, payload in screen._rows() if kind == "action"]
+    assert "auto" not in actions  # no key: the session has no route to plan
+    assert actions == ["use"]

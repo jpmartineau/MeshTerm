@@ -235,7 +235,9 @@ class PathComposerScreen(Screen):
 
         A pinned target (all three ``target_*`` arguments) selects target mode. The
         suggestions do not include the target (the path turns at it implicitly), and the
-        returned spec adds the target and the mirrored return at its end. With no target,
+        returned spec adds the target and the mirrored return at its end. A target that
+        does not relay also selects target mode with only its label, because its walk
+        turns at the last composed hop. With no target,
         the composer is in path mode: the user composes the full walk by hand, and the
         composer returns it exactly. ``outbound`` selects outbound mode, which also has no
         target.
@@ -323,8 +325,13 @@ class PathComposerScreen(Screen):
 
     @property
     def _mirrored(self) -> bool:
-        """Whether the return leg is a mirror at the pinned target (target mode)."""
-        return self._target_id is not None
+        """Whether the return leg is a mirror of the route (target mode).
+
+        A target that does not relay is target mode also with no ``target_id`` (a node
+        that is known by name only), because the walk turns at the last composed hop and
+        never addresses the target.
+        """
+        return self._target_id is not None or not self._target_relays
 
     def _anchor(self) -> str:
         """The node to the left of the insertion slot (our node when the slot is at the start).
@@ -445,7 +452,8 @@ class PathComposerScreen(Screen):
             :data:`_MAX_SUGGESTIONS` items.
         """
         if self._mirrored:
-            exclude = frozenset({self._topology.self_id, self._target_id, *self._hops})
+            target = {self._target_id} if self._target_id is not None else set()
+            exclude = frozenset({self._topology.self_id, *target, *self._hops})
         elif self._outbound:  # a node can be in an outbound path only one time
             exclude = frozenset({self._topology.self_id, *self._hops})
         else:
@@ -513,7 +521,9 @@ class PathComposerScreen(Screen):
             rows.append(("fetch", self._anchor()))
         # Use is the last row, so End goes to it, and the user leaves with the path
         # (JP, 2026-11-07). Auto comes before it.
-        if self._mirrored:  # a path walk has no target for the device to route to
+        # A path walk has no target for the device to route to, and a target that is known
+        # by name only has no route for the session to plan.
+        if self._mirrored and self._target_id is not None:
             rows.append(("action", _AUTO))
         rows.append(("action", _USE))
         return rows
