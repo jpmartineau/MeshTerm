@@ -433,7 +433,7 @@ def _tour(p: Presenter) -> None:
     with p.off_camera():
         p.key("enter", pause=0.0)
         capture.settle(quiet=3.0, timeout=120.0)
-    p.hold(3.0)
+    p.hold(2.5)
     for _ in range(3):
         p.key("right", pause=0.4)
     capture.settle(quiet=0.8, timeout=30.0)
@@ -447,7 +447,7 @@ def _tour(p: Presenter) -> None:
         p.key("pageup", pause=0.0)
         capture.settle(quiet=0.6, timeout=30.0)
         p.hold(0.9)
-    p.hold(3.0)
+    p.hold(2.5)
 
     print("a repeater administered over the air", flush=True)
     _menu(p, "repeater a")
@@ -496,7 +496,7 @@ def _tour(p: Presenter) -> None:
     print("the live feed, and one packet", flush=True)
     _menu(p, "live f")
     p.wait_for("Live feed")
-    p.hold(3.0)
+    p.hold(2.5)
     for _ in range(3):
         p.key("down", pause=0.5)
     p.hold(0.5)
