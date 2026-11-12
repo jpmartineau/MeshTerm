@@ -300,6 +300,17 @@ class ContactsScreen(ContactListScreen):
         self._locked = locked
         self.update_rows(self._contact_rows_for(locked))
 
+    def refresh_self(self, name: str, key: str) -> None:
+        """Draw the row of our node again in place, after our page can change our name.
+
+        The page of our node runs Device config, which can rename our node. Our row is
+        still the same row, so the highlight, the sort, the scroll, and a typed filter stay.
+        """
+        if (name, key) == (self._self_name, self._self_key):
+            return
+        self._self_name, self._self_key = name, key
+        self.update_rows(self._contact_rows_for(self._locked))
+
 
 def _with_opp(slot, label: str, action: str, enabled: bool):  # noqa: ANN001, ANN202 - an FPair
     """``slot`` (an F-key slot, or ``None``) with ``label`` and ``action`` as its Shift half.
@@ -433,6 +444,19 @@ async def open_contacts(
                 if await open_node_detail(ctx, None if chosen == YOU else chosen):
                     rebuild = True
                     break
+                if chosen == YOU:
+                    # Our page runs the tools of the "This node" section. Device config can
+                    # rename our node, so our row reads the name again. The cache answers
+                    # when nothing changed, so this costs no read from the radio.
+                    try:
+                        info = await ctx.devstate.self_info()
+                    except Exception:  # noqa: BLE001 - our row keeps the name that it has
+                        info = {}
+                    if info:
+                        self_name = str(info.get("name") or "this node")
+                        self_key = str(info.get("public_key") or "")
+                        screen.refresh_self(self_name, self_key)
+                    continue
                 # The page can lock or unlock the contact without an end to the visit. The
                 # store answers from memory, so MeshTerm only draws the padlocks again.
                 screen.refresh_locks(_locked_keys(ctx, self_key))

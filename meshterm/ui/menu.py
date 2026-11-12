@@ -936,11 +936,11 @@ async def _menu_round(
         tool = next((t for t in tools if t.name == selection), None)
         if tool is not None and tool.popup:
             ran_over_menu = True
-            await _run_selection(ctx, selection)
+            await run_tool(ctx, selection)
     finally:
         session.pop(menu)
     if not ran_over_menu:
-        await _run_selection(ctx, selection)
+        await run_tool(ctx, selection)
 
 
 async def _startup(ctx: AppContext) -> bool:
@@ -1208,8 +1208,13 @@ def _reading_caption(ctx: AppContext) -> str:
     return "reading…"
 
 
-async def _run_selection(ctx: AppContext, name: str) -> None:
+async def run_tool(ctx: AppContext, name: str) -> None:
     """Get the parameters for one tool from the menu, run the tool, and show its result.
+
+    The main menu calls it for each tool row. The page of our node calls it too, for the
+    rows of the ``This node`` section that it shows (refer to
+    :func:`~meshterm.ui.node_detail_screen.open_node_detail`). Thus a tool behaves the same
+    from both places: the same prompts, the same result, and the same failure dialog.
 
     This function does not handle a lost device link. The watcher for the full session
     (refer to :func:`_session_loop`) polls independently, and opens the reconnect dialog

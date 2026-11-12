@@ -802,7 +802,7 @@ async def test_pop_all_passes_straight_through_an_except_exception_guard() -> No
     """An unwind is not a tool failure.
 
     The app wraps tool runs in ``except Exception``, so that a broken tool cannot stop the
-    menu (:func:`meshterm.ui.menu._run_selection` is the widest such guard). An unwind must
+    menu (:func:`meshterm.ui.menu.run_tool` is the widest such guard). An unwind must
     cross these guards. They must not catch it and report it as an error. This is the reason
     that :class:`PopToMenu` derives from ``BaseException``.
     """

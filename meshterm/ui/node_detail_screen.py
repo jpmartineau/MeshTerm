@@ -1522,7 +1522,10 @@ async def open_node_detail(
         ctx: The shared application context (the interactive TUI must be running).
         contact: The contact to show, or ``None`` for our node (a page of identity and
             ledger only, because our node never overhears itself, so there is no reception
-            history to show).
+            history to show). The page of our node also offers the tools of the ``This
+            node`` section of the main menu. If one of them changes what the page shows
+            (Device config can change the name or the location), the page opens again with
+            the new values.
         manage: Whether to show the contact-management actions (lock, archive, restore,
             delete). ``False`` draws none of them, and then the page can only return
             ``False``.
@@ -1560,10 +1563,7 @@ async def open_node_detail(
 
     # -- our node, for the "us" label, the centre of the location preview, and the range
     # and bearing.
-    try:
-        info = await ctx.devstate.self_info()
-    except Exception:  # noqa: BLE001 - the page is useful without our identity and fix
-        info = {}
+    info = await _read_self_info(ctx)
     self_name = str(info.get("name") or "this node")
     self_key = str(info.get("public_key") or "")
     self_lat, self_lon = _as_float(info.get("adv_lat")), _as_float(info.get("adv_lon"))
@@ -1840,6 +1840,10 @@ async def open_node_detail(
     # map (a roof, a tower), or a place for a node with no location at all.
     if places is not None and node_id:
         info_actions.append(_Action("place", "✎", "", "Set place…"))
+    if you:
+        # Our page is where the user looks at our node, so it offers the tools of the main
+        # menu that act on our node: its whole ``This node`` section, row for row.
+        info_actions.extend(_this_node_actions())
     if asks_regions:
         # It acts immediately (one anonymous request, one transmission), so no "…" at the
         # end.
@@ -1980,6 +1984,8 @@ async def open_node_detail(
     # Whether the visit ended with a delete of the contact. This tells the caller to build
     # its list again.
     contact_removed = False
+    # Whether a tool changed what the page shows of our node. Then the page opens again.
+    reopen = False
     # One screen for the full visit. The page is a *hub*: each action on it opens a different
     # screen and comes back. Thus the page stays pushed while each action runs
     # (``session.stay``), and it is not built again for each round. Before, each new build
@@ -2097,12 +2103,68 @@ async def open_node_detail(
                 contact_removed = await _remove_contact(ctx, contact, self_key, label)
                 if contact_removed:
                     break
+            elif isinstance(action, str) and action.startswith(_TOOL_ACTION):
+                from .menu import run_tool
+
+                await run_tool(ctx, action.removeprefix(_TOOL_ACTION))
+                # Device config can change what this page shows of our node: its name, its
+                # location, or its type. Then the page is built again from the new values.
+                fresh = await _read_self_info(ctx) if you else {}
+                if fresh and _shown_self(fresh) != _shown_self(info):
+                    reopen = True
+                    break
     if minimap is not None:
         # The braille of the preview may have left marks on the terminal (double-width
         # fallback glyphs that the diff of prompt_toolkit cannot see). Force one clean paint
         # of the list below, exactly as the full map does when it closes.
         session.request_full_repaint()
+    if reopen:
+        # The old page closed, and a new page opens in its place, one level above the same
+        # screen. Thus Esc from the new page still goes back to where the user came from.
+        return await open_node_detail(ctx, contact, manage=manage, lock=lock)
     return contact_removed
+
+
+#: The section of the main menu whose tools act on our node. The page of our node offers
+#: each tool of this section (refer to :func:`_this_node_actions`).
+THIS_NODE_SECTION = "This node"
+
+#: The start of the token of an action row that runs a tool of the main menu. The rest of
+#: the token is the name of the tool.
+_TOOL_ACTION = "tool:"
+
+#: The fields of the self-info that the page of our node shows. When a tool that the page
+#: runs changes one of them, the page is built again.
+_SHOWN_SELF_FIELDS = ("name", "public_key", "adv_lat", "adv_lon", "adv_type")
+
+
+def _this_node_actions() -> list[_Action]:
+    """One action row for each tool of the ``This node`` section of the main menu.
+
+    The rows come from the tool registry, in the order of the menu, with the icon and the
+    title of each menu row. Thus a tool that MeshTerm adds to the section, or removes from
+    it, changes the page too, and the two places always use the same words.
+    """
+    from ..tools import all_tools
+
+    return [
+        _Action(f"{_TOOL_ACTION}{tool.name}", tool.icon, "", tool.title or tool.name)
+        for tool in all_tools()
+        if tool.menu_visible and tool.category == THIS_NODE_SECTION
+    ]
+
+
+async def _read_self_info(ctx: AppContext) -> dict:
+    """The self-info of the device, or an empty dict when the device does not answer."""
+    try:
+        return await ctx.devstate.self_info()
+    except Exception:  # noqa: BLE001 - the page is useful without our identity and fix
+        return {}
+
+
+def _shown_self(info: dict) -> tuple:
+    """The values of the self-info that the page of our node shows."""
+    return tuple(info.get(field) for field in _SHOWN_SELF_FIELDS)
 
 
 def _management_rows(

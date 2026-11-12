@@ -2102,6 +2102,25 @@ def test_k_on_the_contacts_list_asks_to_toggle_the_lock_of_the_highlighted_conta
     assert "^K" not in plain.footer_hint
 
 
+def test_our_row_takes_a_new_name_in_place() -> None:
+    """After our page renamed our node (Device config), our row shows the new name.
+
+    The row stays the same row: the highlight stays where it was.
+    """
+    from meshterm.core.models import Contact
+    from meshterm.ui.contacts_screen import ContactsScreen
+    from tests.conftest import plain
+
+    alice = Contact(name="Alice", public_key="aa" * 32, key_prefix="aa" * 6)
+    screen = ContactsScreen("Us", "cc" * 32, [alice], 1, {}, _contacts_sort())
+    screen.handle("down")
+    highlighted = screen._current_choice().value
+    screen.refresh_self("Renamed", "cc" * 32)
+    body = plain(screen.render_body(72))
+    assert "Renamed" in body and "Us (you)" not in body
+    assert screen._current_choice().value is highlighted
+
+
 async def test_k_on_the_contacts_list_toggles_the_lock_in_place(tmp_path) -> None:  # noqa: ANN001
     """^K writes the lock to the store, and the row gains its padlock on the same screen.
 

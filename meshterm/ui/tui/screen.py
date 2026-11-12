@@ -59,7 +59,7 @@ class PopToMenu(BaseException):
     It derives from :class:`BaseException`, not :class:`Exception`, for the same reason as
     :class:`asyncio.CancelledError`. The app has many ``except Exception`` guards. These
     guards stop a tool that has a fault before it can stop the menu
-    (:func:`~meshterm.ui.menu._run_selection` has the widest guard). An unwind must go
+    (:func:`~meshterm.ui.menu.run_tool` has the widest guard). An unwind must go
     through these guards. They must not catch it and report it as a failure of a tool.
     ``finally`` blocks still run, so nothing leaks.
 

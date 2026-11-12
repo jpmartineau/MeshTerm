@@ -2178,7 +2178,7 @@ async def _run_failing_tool(tmp_path: Path, monkeypatch, exc: Exception) -> _Too
     monkeypatch.setattr(tools, "get_tool", lambda name: _Tool())
     monkeypatch.setattr(ctx, "ui", ui)
     try:
-        await menu._run_selection(ctx, "contacts")
+        await menu.run_tool(ctx, "contacts")
     finally:
         ctx.repo.close()
     return ui
