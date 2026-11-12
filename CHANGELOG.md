@@ -9,6 +9,148 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-11
+
+**MeshTerm finds wrong clocks, names the place of each node, and lets you choose the route
+of your radio to each contact.** A message from a node with a wrong clock shows the time
+that it arrived, with a `?` mark. The new Clock drift page lists the wrong clocks, and it
+can set the clocks of your managed nodes. Each node that advertises a location gets a
+place, such as `Villeray, Montréal`, and ^N shows the places on a path. Outbound paths name
+the ways out of your node at each site. On the node page, you can set, keep, or forget the
+route that the radio holds to a contact. A stored admin password that gets no reply now
+offers a new one.
+
+### Added
+
+- **A message from a node with a wrong clock shows its arrival time, with a `?` mark.** A
+  message carries the time of its sender's clock. When that clock was wrong, the message
+  showed a wrong time, and a clock one year ahead kept its contact at "heard now". Now
+  MeshTerm also keeps the time when the message arrived. When the two times are farther
+  apart than the **Clock tolerance** preference, the chat shows the arrival time as
+  `12:31?`. A selected message says what the sender's clock wrote, and how far off it is.
+  Heard times, the order of the Messages list, and the activity of a channel use the
+  arrival time. For old channel messages, MeshTerm finds the arrival time in the packet log.
+  `meshterm chat history` shows the same mark, and its JSON gives both times.
+- **The Clock drift page shows which nodes have wrong clocks.** It is in the Watch section
+  of the menu, and on the command line it is `meshterm clocks`. Each advert and each
+  message gives a sample of its node's clock. A histogram of all the clocks is at the top.
+  Then come your managed nodes, the nodes whose clocks are out of sync, and the senders
+  with no key. Enter opens the page of a node. When most clocks are off in the same
+  direction, a note says that your own clock can be wrong. The **Clock report** preference
+  sets how many days the page reads. The node page also shows the clock offset of its node.
+- **"Sync their clocks…" sets the clock of each managed repeater and room server.** The row
+  is on the Clock drift page. After one confirm, a dialog lists each node and shows its
+  progress: the wait for the transmit cooldown, the login, and the clock command. Then each
+  node gets ✓ and its reply, or ✗ and the reason. Esc stops the run after the node in
+  progress. On the node page, "Sync its clock…" does the same for one node.
+- **The node page repairs two problems that a wrong clock causes.** When the device holds a
+  time in the future for a contact, the firmware refuses each new advert from it. The node
+  page says so, and "Accept its adverts again…" repairs it. The Clock drift page lists
+  these contacts. A room server whose clock went back sends no new posts, because each new
+  post seems older than the posts that you have. The node page says that its posts are
+  blocked, and "Ask for all its posts again…" repairs it.
+- **Managed nodes have a 🔑 mark.** A managed node is a node whose admin password MeshTerm
+  stores. The mark is next to the type mark in the Contacts list, in the admin picker, and
+  on the node page. The "Other nodes" section of the menu is now "Managed nodes".
+- **Each node that advertises a location gets a place.** A place is the named area nearest
+  the node: a neighbourhood and its city (`Villeray, Montréal`), a village, or a peak.
+  MeshTerm finds it in the map tiles first, with no network. When MeshTerm is online,
+  Nominatim corrects it. The **Place names** preference sets the source. The node page
+  shows the place, and "Set place…" lets you type your own. Your place wins over the place
+  that MeshTerm found.
+- **^N shows the place of each node on a path.** Press ^N again to show the names. It works
+  on Message paths, on the Routes tab of the node page, in the packet viewer, the live
+  feed, Trace, the Trophy case, the TX sweep, the mesh walk, and the path composer. On the
+  handhelds, the chip is `Places`.
+- **The Contacts list has a PLACE column, before KEY.** The columns now take the width of
+  their content, and they cut no value. When the table is wider than the screen, ←→ pan it,
+  and the mark and the name stay. You can sort on the place, and typing finds a place too.
+  The Archived list has the same column. The archive preview shows PLACE instead of MSGS
+  and HOPS, which were almost always empty. The find filter of the map also finds a place.
+  The `contacts` command has a PLACE column and `--sort place` and `--sort hash`, and each
+  node in its JSON has a `place` key.
+- **Outbound paths name the ways out of your node.** Open Explore, then Outbound paths. For
+  each site where you use your computer (`Home`, `Work`), write the paths that start at
+  your node, in order. One site is active. A fixed device, which is a companion that never
+  moves, keeps its own paths. Each path shows how well its first hop hears you, and how
+  well you hear it. Measure sends one trace along the path and back. The suggested routes
+  of Explore paths, of the node page, and of Trace now start on an outbound path, and the
+  path composer shows your outbound paths first. When the radio hears the first hop of
+  another site three times, the main menu offers to change to that site. The **Suggest a
+  site** preference turns this off. On the command line, it is `meshterm outbound`.
+  ([#35](https://github.com/jpmartineau/MeshTerm/issues/35))
+- **You can set, keep, or forget the route that the radio holds to a contact.** The radio
+  holds one route to each contact, and replaces it with each new route that it learns,
+  good or bad. The Routes tab of the node page now ends on a "Device route" row, which says
+  what the radio holds. Enter opens a dialog with "Set the route…", "Keep this route",
+  "Forget the route", and "Discover routes…". Set the route offers the suggested route, the
+  routes heard, no relays, or a route that you compose. Discover routes sends one path
+  discovery and shows the route in each direction. MeshTerm writes a kept route back each
+  time that the radio replaces it. When you change site, MeshTerm saves the routes that the
+  radio learned at the old site, and writes back the routes of the new site. The new
+  **Auto route** preference (off) sets the suggested route before a direct message when
+  the radio has none. On the command line, it is `meshterm route`.
+  ([#34](https://github.com/jpmartineau/MeshTerm/issues/34))
+- **A trace that comes home offers its route to the radio.** Trace target has a "Device
+  route" row. When a trace comes home on a route that is not the radio's route, the row
+  turns green and offers that route for direct messages and admin. A route that you adopt
+  from Probe all on Explore paths starts with the traces that measured it, so it needs no
+  second transmission. ([#34](https://github.com/jpmartineau/MeshTerm/issues/34))
+- **Enter on Message paths traces the route of a message.** In a chat, press ^P, then
+  Enter on an arrival. The trace screen opens on the route that the row draws, and it
+  transmits nothing until you start the trace. A received message is traced back to its
+  sender, and a sent direct message is traced to its recipient. A sent channel message is
+  traced on the full route on which it came back. Esc goes back to the same row of Message
+  paths. ([#34](https://github.com/jpmartineau/MeshTerm/issues/34))
+- **A direct message or an admin login that gets no reply can try again by flood.** The
+  radio never forgets a route that stopped working, so each retry on that route was lost.
+  Now ^R on a direct message that went on a route asks: Cancel, On route, or By flood. By
+  flood forgets the route and sends the message one time. An admin login that gets no
+  reply offers "Try by flood" in the same way. Nothing floods unless you choose it.
+  ([#34](https://github.com/jpmartineau/MeshTerm/issues/34))
+- **You can make MeshTerm forget stored admin passwords.** In the admin picker, Del on a
+  managed node forgets its password, after an amber confirm. The new "Forget passwords"
+  row in the Managed nodes section of the menu forgets all of them, after you type
+  `FORGET`. It also forgets the passwords of nodes that are no longer contacts. On the
+  command line, it is `meshterm forget-admin-passwords --yes`.
+  ([#28](https://github.com/jpmartineau/MeshTerm/issues/28))
+- **Your own node page has the This node tools.** Device info, Device config, and Send
+  advert are on the page that opens from your row in the Contacts list. When Device config
+  changes your name or location, the page shows the new values.
+
+### Changed
+
+- **All node names have the same lightness.** On a terminal with full colour, the hues of
+  the names came from a colour wheel on which blue was dark and yellow was very light. Now
+  each hue keeps its angle, at one lightness. Thus each name is equally easy to read, and
+  each chip has approximately the same contrast. The thin line between two chips of the
+  same colour is softer. It is halfway between the label and the fill of the chip.
+- In Trace path with no path, the highlight starts on Compose path, because Trace cannot
+  act there. When you adopt a route in Explore paths, the highlight goes to Trace. In the
+  path composer, "Use this path" is the last row.
+  ([#29](https://github.com/jpmartineau/MeshTerm/issues/29))
+
+### Fixed
+
+- **A stored admin password that gets no reply offers a new one.** A repeater or a room
+  server does not answer a wrong password. Thus, after its owner changed the password,
+  MeshTerm got no reply, as from a node that is down. MeshTerm kept the old password and
+  tried it again at each visit, and you could not type the new one. Now the dialog says
+  that the password may have changed, and offers "New password…". The new password
+  replaces the stored one only when the node accepts it. On the command line,
+  `repeater-admin` and `tx-optimize` say that a new run with `--password` repairs it.
+  ([#28](https://github.com/jpmartineau/MeshTerm/issues/28))
+- **A trace to a companion comes home.** With the default firmware settings, a companion,
+  a room server, or a sensor does not relay a trace. Thus a trace that turned at such a
+  node never came back. Now the trace turns at the last relay of the route, and a line
+  under the route names that relay. The route that comes home is still the route to the
+  node, so the Device route row can offer it. When the route has no relay, Trace is dim.
+  `meshterm trace -t NAME` with no `--path` does the same, and says on stderr where it
+  turns.
+- **A channel sender or a mention can have a name of up to 32 characters.** MeshCore
+  permits a name of 32 bytes, but MeshTerm stopped at 20 characters. A sender with a
+  longer name showed with no name and no key.
+
 ## [0.11.5] - 2026-10-22
 
 **The Courier outbox is a table, and Enter opens the message of an entry.** Each section of
@@ -738,7 +880,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.11.5...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.12.0
 [0.11.5]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.5
 [0.11.4]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.4
 [0.11.3]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.3
