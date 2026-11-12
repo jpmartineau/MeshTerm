@@ -1691,6 +1691,9 @@ async def open_node_detail(
     info_rows: list[tuple[str, Text]] = []
     # Whether a room sends us no new post, because its clock went back (set below).
     room_blocked = False
+    # The date until which the device refuses the adverts of the node (set below). Our own
+    # page has none, but the action rows read it on each page.
+    refused: datetime | None = None
     if key:
         info_rows.append(("key", highlighted_hash(key, prefix_bytes, known=bool(name))))
     else:

@@ -1538,3 +1538,54 @@ def test_the_place_row_follows_the_finder_above_where() -> None:
     assert body.index("place") < body.index("where")
     found[0] = None
     assert "Villeray" not in _plain(screen.render_body(72))
+
+
+async def test_our_own_page_opens_and_closes(tmp_path) -> None:  # noqa: ANN001
+    """Enter on our row of the Contacts list opens our page, and Esc closes it.
+
+    The page of our node has no contact. Before, the action rows read a value that only the
+    page of a contact sets, and the page raised ``UnboundLocalError`` before it showed.
+    """
+    import asyncio
+    import io
+
+    from rich.console import Console
+
+    from meshterm.context import AppContext
+    from meshterm.core.admin_store import AdminStore
+    from meshterm.core.config import Settings
+    from meshterm.core.device_store import DeviceStore
+    from meshterm.persistence.repository import Repository
+    from meshterm.ui.node_detail_screen import NodeDetailScreen, open_node_detail
+    from meshterm.ui.surface import TuiUi
+    from meshterm.ui.tui.session import TuiSession
+
+    settings = Settings(config_dir=tmp_path, db_path=tmp_path / "history.db")
+    ctx = AppContext(
+        console=Console(file=io.StringIO()),
+        settings=settings,
+        repo=Repository(settings.db_path),
+        device_store=DeviceStore(tmp_path / "devices.json"),
+        admin_store=AdminStore(tmp_path / "admin.json"),
+        mock=True,
+    )
+    ctx.ui = TuiUi(TuiSession())
+    task = asyncio.ensure_future(open_node_detail(ctx, None))
+    try:
+        page = None
+        for _ in range(500):
+            top = ctx.ui.session.top
+            if isinstance(top, NodeDetailScreen) or task.done():
+                page = top if isinstance(top, NodeDetailScreen) else None
+                break
+            await asyncio.sleep(0)
+        if task.done():
+            task.result()  # raise what the page raised, if anything
+        assert page is not None
+        assert page.title.endswith("(you)")
+        page.resolve(CANCEL)
+        assert await task is False
+    finally:
+        if not task.done():
+            task.cancel()
+        ctx.repo.close()
