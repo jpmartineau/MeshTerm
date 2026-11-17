@@ -260,6 +260,20 @@ gh release view vX.Y.Z --json assets --jq '.assets | length'
 If a *build* fails, the tag is already public: fix forward with a new patch version rather
 than deleting and re-pushing a tag people may have fetched.
 
+### Tell each fixed issue which release has its fix
+
+An issue is closed when its fix is pushed (JP, 2026-11-16), so the reporter does not yet
+have a version to install. Once the release has landed, comment on each issue whose fix is
+in this release: the issues that commits since the previous tag name, and the issues closed
+since then. Read each one first, and skip one whose fix is not in the range.
+
+```
+git log vPREV..vX.Y.Z --format='%s%n%b' | grep -oE '#[0-9]+' | sort -u
+gh issue comment N --body "The fix is in MeshTerm X.Y.Z: https://github.com/jpmartineau/MeshTerm/releases/tag/vX.Y.Z"
+```
+
+If a fix did not work, say so on the issue and reopen it instead.
+
 ## 7. The Discord announcement — for JP to post
 
 Once the release has landed and checked out, end by showing JP a short announcement for
