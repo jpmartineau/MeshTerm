@@ -4537,7 +4537,14 @@ class MeshCoreDevice(Device):
     ) -> None:
         transmit_gate.mark()
         async with self.transmitting():
-            self._ok(await self._require().commands.send_chan_msg(index, text))
+            event = await self._require().commands.send_chan_msg(index, text)
+        # For a channel send, "not found" is an empty slot, not a contact. The general
+        # clause names a contact, which was the wrong lead in issue #36.
+        if error_code(event) == 2:
+            raise RuntimeError(
+                f"device rejected the command: the device has no channel in slot {index}"
+            )
+        self._ok(event)
 
     @staticmethod
     def _ok(event):  # type: ignore[no-untyped-def]

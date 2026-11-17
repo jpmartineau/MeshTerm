@@ -177,6 +177,14 @@ class ChatTool(Tool):
                     await self._delete_history(ctx, choice.value)
                 elif choice is CANCEL or choice is None:  # Esc: back to the menu
                     return ToolResult(summary={"conversations": opened, "messages": shown})
+                elif not choice.on_device:
+                    # A channel that the device does not have never opens: the device
+                    # refuses each send on it. Enter asks to add it. After a refusal, the
+                    # picker stays.
+                    added = await _add_public_channel(ctx)
+                    if added is not None:
+                        shown = await open_chat(ctx, added)
+                        opened += 1
                 else:
                     shown = await open_chat(ctx, choice)
                     opened += 1
@@ -623,23 +631,26 @@ def _enable_receive_debug() -> None:
 
 
 def _channels_from_slots(slots: list[ChannelSlot]) -> list[Conversation]:
-    """Change cached channel slots into channel conversations, and always offer Public (slot 0).
+    """Change cached channel slots into channel conversations, and offer Public if it is absent.
 
     The picker reads its channels through the session cache
     (:meth:`~meshterm.services.device_state.DeviceState.channel_slots`). Thus it uses the one
     slow slot probe again, and does not read each slot again each time that Chat opens.
     This function maps that cached :class:`~meshterm.core.channel_probe.ChannelSlot` list
-    onto the :class:`~meshterm.core.models.Conversation` rows of the picker. When the
-    firmware reports no slot for channel 0 (the default public channel), this function
-    makes one. Thus there is always a place to chat. :func:`_read_channels` (the CLI path)
-    gives the same guarantee.
+    onto the :class:`~meshterm.core.models.Conversation` rows of the picker.
+
+    When slot 0 is empty and no slot has the Public channel, this function adds a Public row
+    with ``on_device=False``. The device cannot send on a slot that it does not have: it
+    refuses the send. Thus that row never opens a chat. It is an offer: Enter asks to add
+    Public to slot 0 (refer to :func:`_add_public_channel`). Issue #36 was a row that looked
+    the same as a real channel and failed on each send.
 
     Args:
         slots: The configured channel slots, from the session cache.
 
     Returns:
-        One :class:`~meshterm.core.models.Conversation` for each slot, with Public at the
-        start when slot 0 is absent.
+        One :class:`~meshterm.core.models.Conversation` for each slot. A Public offer is at
+        the start when the device has no Public channel and slot 0 is empty.
     """
     conversations = [
         Conversation(
@@ -651,7 +662,9 @@ def _channels_from_slots(slots: list[ChannelSlot]) -> list[Conversation]:
         )
         for slot in slots
     ]
-    if not any(c.channel_idx == 0 for c in conversations):
+    if not any(c.channel_idx == 0 for c in conversations) and not any(
+        slot.secret == DEFAULT_PUBLIC_SECRET for slot in slots
+    ):
         conversations.insert(
             0,
             Conversation(
@@ -660,23 +673,60 @@ def _channels_from_slots(slots: list[ChannelSlot]) -> list[Conversation]:
                 channel_idx=0,
                 channel_id="slot:0",
                 secret=DEFAULT_PUBLIC_SECRET,
+                on_device=False,
             ),
         )
     return conversations
 
 
+async def _add_public_channel(ctx: AppContext) -> Conversation | None:
+    """Ask to add the Public channel to slot 0. Write it if the user agrees.
+
+    The Chat picker calls this function for its Public offer (``on_device=False``, refer to
+    :func:`_channels_from_slots`). The function asks first and does not write silently,
+    because the write changes what the device stores. The precedent is the contact that is
+    not on the device (refer to :func:`meshterm.ui.chat._restore_contact`).
+
+    Args:
+        ctx: The shared application context.
+
+    Returns:
+        The conversation of the Public channel on the device, ready to open. ``None`` if the
+        user cancelled, or if the probe after the write does not find the channel.
+
+    Raises:
+        DeviceCommandError: If the device refused the write.
+    """
+    from ..ui.channels import write_channel
+
+    add = await ctx.ui.dialog(
+        "This device has no Public channel, so it can't send there. "
+        "Add Public to slot 0 and open it?",
+        [("Cancel", False), ("Add", True)],
+        title="Channel not on device",
+        default=1,
+    )
+    if not add:
+        return None
+    device = await ctx.device()
+    await write_channel(ctx, device, 0, "Public", DEFAULT_PUBLIC_SECRET)
+    channels = _channels_from_slots(await ctx.devstate.channel_slots())
+    return next((c for c in channels if c.on_device and c.channel_idx == 0), None)
+
+
 async def _read_channels(device: Device) -> list[Conversation]:
     """Probe the channel slots, and return them as channel conversations.
 
-    This function always offers channel 0 (the default public channel), also when the
-    firmware reports no configured slots. Thus there is always a place to chat.
+    This function returns only the channels that are on the device. The device refuses a
+    send on an empty slot. Thus a listed channel that is not on the device is a promise that
+    fails at the first send (issue #36). ``channels join`` with the well-known key adds the
+    Public channel.
 
     Args:
         device: The connected device to probe.
 
     Returns:
-        One :class:`~meshterm.core.models.Conversation` for each configured channel (at
-        least channel 0).
+        One :class:`~meshterm.core.models.Conversation` for each configured channel.
     """
     conversations: list[Conversation] = []
     for idx in range(CHANNEL_SLOT_PROBE_CAP):
@@ -696,17 +746,6 @@ async def _read_channels(device: Device) -> list[Conversation]:
                     secret=secret,
                 )
             )
-    if not any(c.channel_idx == 0 for c in conversations):
-        conversations.insert(
-            0,
-            Conversation(
-                label="Public",
-                is_channel=True,
-                channel_idx=0,
-                channel_id="slot:0",
-                secret=DEFAULT_PUBLIC_SECRET,
-            ),
-        )
     return conversations
 
 
@@ -1003,7 +1042,11 @@ def _title(
     else:
         text.append(lane, style="muted")
     text.append("  ")
-    if last is not None:
+    if not conversation.on_device:
+        # The preview lane explains the offer. Enter asks to add the channel (it never opens
+        # a chat), so the text ends with the ellipsis of a row that opens a prompt.
+        text.append("not on the device — Enter adds it…", style="muted")
+    elif last is not None:
         text.append_text(_preview_text(last, key_of, name_of, us=us))
     return text
 

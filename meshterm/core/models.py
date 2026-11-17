@@ -917,6 +917,9 @@ class Conversation:
         secret: For channels: the 16-byte secret of the channel. MeshTerm uses it only to
             show the public or private mark of the channel. ``None`` when it is not known.
         contact: The contact, for direct conversations and rooms.
+        on_device: For channels: ``False`` when the device has no such channel. The Chat
+            picker shows the Public channel in this state when no slot has it. The row is
+            an offer to add the channel, and it never opens a chat.
     """
 
     label: str
@@ -925,6 +928,7 @@ class Conversation:
     channel_id: str | None = None
     secret: bytes | None = None
     contact: Contact | None = None
+    on_device: bool = True
 
     @property
     def peer(self) -> str | None:

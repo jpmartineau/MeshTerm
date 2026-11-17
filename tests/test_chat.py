@@ -3801,3 +3801,95 @@ def test_a_sender_with_no_key_opens_trace_target_under_its_name(monkeypatch) -> 
         _trace_walk(_trace_ctx(), walk, contacts=[], label="Lindsay", node_type=NODE_TYPE_CHAT)
     )
     assert calls == [("target", "Lindsay", "3d,51,1b,40,1b,51,3d", "Lindsay", NODE_TYPE_CHAT)]
+
+
+# -- the Public offer (issue #36) ---------------------------------------------
+
+
+def test_picker_offers_public_when_the_device_has_none() -> None:
+    """With no Public on the device, the picker offers it on slot 0, as a row that is not on it."""
+    from meshterm.core.channel_probe import ChannelSlot
+    from meshterm.tools.chat import _channels_from_slots
+
+    (offer,) = _channels_from_slots([])
+    assert offer.label == "Public" and offer.channel_idx == 0 and not offer.on_device
+    other = ChannelSlot(1, "#test", derive_secret("#test"))
+    assert [c.on_device for c in _channels_from_slots([other])] == [False, True]
+
+
+def test_picker_has_no_offer_when_public_is_on_the_device() -> None:
+    """A Public channel on any slot is the real row. The picker adds no second Public."""
+    from meshterm.core.channel_probe import ChannelSlot
+    from meshterm.tools.chat import _channels_from_slots
+
+    on_two = _channels_from_slots([ChannelSlot(2, "Public", DEFAULT_PUBLIC_SECRET)])
+    assert [(c.channel_idx, c.on_device) for c in on_two] == [(2, True)]
+    on_zero = _channels_from_slots([ChannelSlot(0, "Public", DEFAULT_PUBLIC_SECRET)])
+    assert [(c.channel_idx, c.on_device) for c in on_zero] == [(0, True)]
+
+
+def test_offer_row_says_the_channel_is_not_on_the_device(repo: Repository) -> None:
+    """The offer row explains itself in the preview lane, and shows no message preview."""
+    from meshterm.tools.chat import _channels_from_slots
+
+    (offer,) = _channels_from_slots([])
+    title = _title(_RowCtx(repo, unread={}), offer, {}, _NO_KEYS, _lanes([offer]))
+    assert "not on the device — Enter adds it…" in title.plain
+
+
+class _OfferUi:
+    def __init__(self, answer) -> None:
+        self.answer = answer
+        self.asked: list[str] = []
+
+    async def dialog(self, prompt, buttons, **_kw):
+        self.asked.append(prompt)
+        return self.answer
+
+
+class _OfferDevstate:
+    def __init__(self) -> None:
+        self.slots: list = []
+
+    async def channel_slots(self):
+        return list(self.slots)
+
+
+def _offer_ctx(answer, monkeypatch: pytest.MonkeyPatch):
+    from types import SimpleNamespace
+
+    from meshterm.core.channel_probe import ChannelSlot
+
+    writes: list[tuple] = []
+    devstate = _OfferDevstate()
+
+    async def write_channel(ctx, device, idx, name, secret) -> None:
+        writes.append((idx, name, secret))
+        devstate.slots.append(ChannelSlot(idx, name, secret))
+
+    monkeypatch.setattr("meshterm.ui.channels.write_channel", write_channel)
+
+    async def device():
+        return object()
+
+    ctx = SimpleNamespace(ui=_OfferUi(answer), devstate=devstate, device=device)
+    return ctx, writes
+
+
+def test_public_offer_cancel_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancel on the offer writes nothing and opens nothing: the picker stays."""
+    from meshterm.tools.chat import _add_public_channel
+
+    ctx, writes = _offer_ctx(False, monkeypatch)
+    assert asyncio.run(_add_public_channel(ctx)) is None
+    assert ctx.ui.asked and writes == []
+
+
+def test_public_offer_add_writes_slot_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Add writes Public with its well-known key to slot 0, and returns the real channel."""
+    from meshterm.tools.chat import _add_public_channel
+
+    ctx, writes = _offer_ctx(True, monkeypatch)
+    added = asyncio.run(_add_public_channel(ctx))
+    assert writes == [(0, "Public", DEFAULT_PUBLIC_SECRET)]
+    assert added is not None and added.on_device and added.channel_idx == 0
