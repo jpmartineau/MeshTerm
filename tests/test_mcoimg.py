@@ -320,3 +320,26 @@ def test_the_image_screen_makes_a_small_image_larger() -> None:
     assert fit(4, 2, 72, 22, grow=True) == (72, 36)  # 18 times: the width is the limit
     assert fit(16, 16, 53, 24, grow=True) == (48, 48)  # 3 times: 24 rows hold 48 pixels
     assert fit(4, 2, 72, 22) == (4, 2)  # under a message, never larger
+
+
+@pytest.mark.parametrize(("cols", "rows"), [(72, 24), (120, 40), (53, 26), (53, 14)])
+@pytest.mark.parametrize("text", ["im3:g/5WjAL`NA", "im3:TAYL>iBNGbA"])
+def test_the_image_screen_centres_the_image_with_a_margin(text: str, cols: int, rows: int) -> None:
+    """On its bare frame, the image is centred, a little above the middle, with page around it."""
+    import re
+
+    from meshterm.ui.pixelart import ImageScreen
+    from meshterm.ui.tui.frame import compose_bare
+    from meshterm.ui.widgets import pixel_image_text
+
+    screen = ImageScreen(decode(text), pixel_image_text(recognize(text)))
+    for _ in range(2):  # the first paint tells the screen its rows
+        frame = compose_bare(screen, cols, rows)
+    lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in frame.split("\n")]
+    ink = [index for index, line in enumerate(lines) if line.strip()]
+    above, below = ink[0], rows - 1 - ink[-1]
+    assert 1 <= above <= below
+    art = lines[ink[0]]
+    left, right = len(art) - len(art.lstrip()), cols - len(art.rstrip())
+    assert left >= 2 and right >= 2
+    assert abs(left - right) <= 1

@@ -148,6 +148,15 @@ def _hex(rgb: RGB | None) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+#: The cells of page at each side of the image on its bare frame.
+_MARGIN_COLS = 2
+#: The rows of page that the image and its caption leave free on the bare frame, in total.
+#: The frame puts two fifths of the free rows above the block (refer to
+#: :func:`~meshterm.ui.tui.frame.compose_bare`). With three, one row is above and two are
+#: below. With two, the frame puts both below, and the image touches the top.
+_MARGIN_ROWS = 3
+
+
 class ImageScreen(ScrollScreen):
     """The pixel image of a message on a bare frame, as large as the frame permits (^U).
 
@@ -155,6 +164,10 @@ class ImageScreen(ScrollScreen):
     header, no footer, no box, and no hint. Esc leaves, as it does everywhere. The image
     fits itself to the frame at each paint, so a larger terminal shows a larger image. One
     line under it gives its size and its colours, centred.
+
+    The image never touches the edges of the frame. It keeps :data:`_MARGIN_COLS` cells at
+    each side and at least one row above and below, as a QR code keeps its quiet zone. The
+    frame puts the block a little above the true centre, as it does for a code.
     """
 
     bare = True
@@ -175,10 +188,12 @@ class ImageScreen(ScrollScreen):
         # The frame notes its height before it asks for the body, as on the share screen.
         rows = self._scroll_viewport
         picture = self.picture
-        art_rows = max(1, rows - 2)  # a blank row and the caption
-        cols, _ = fit(picture.width, picture.height, width, art_rows, grow=True)
+        # The margins, then a blank row and the caption.
+        art_rows = max(1, rows - _MARGIN_ROWS - 2)
+        art_cols = max(1, width - 2 * _MARGIN_COLS)
+        cols, _ = fit(picture.width, picture.height, art_cols, art_rows, grow=True)
         indent = max(0, (width - cols) // 2)
-        art = picture_text(picture, width, indent=indent, max_rows=art_rows, grow=True)
+        art = picture_text(picture, art_cols, indent=indent, max_rows=art_rows, grow=True)
         caption = self._caption.copy()
         caption.justify = "center"
         self.replace_content(Group(art, Text(""), caption))
