@@ -39,3 +39,34 @@ Cascadia Code. It is redistributed here unmodified under the SIL Open Font
 License, Version 1.1, which is included beside it as CascadiaMono-OFL.txt and
 is its only license -- the Apache License above does not apply to it. The
 inclusion of this font does not imply that Microsoft endorses MeshTerm.
+
+MCOimg colour tables: meshterm/core/mcoimg_palettes.py holds the colour
+tables of the MCOimg image format, generated from lib/helpers/mcoimg_palette.dart
+and lib/helpers/mcoimg_dynamic_palettes.dart of meshcore-open
+(https://github.com/zjs81/meshcore-open, and the HDDen/meshcore-open fork),
+which are provided under the following license:
+
+  MIT License
+
+  Copyright (c) 2025 zjs81
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+MeshTerm's MCOimg decoder is its own code, written from the published format
+reference; only these colour values come from meshcore-open.
