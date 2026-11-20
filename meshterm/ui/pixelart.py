@@ -6,14 +6,16 @@ above the other, and each pixel is square: ``▀`` with the top pixel as its col
 bottom pixel as its background. A transparent pixel shows the page. A cell with only the
 bottom pixel is ``▄`` in that colour, and a cell with no pixel is a space.
 
-An image that is wider than the lane, or taller than the rows that the platform can give
-it, becomes smaller (refer to :func:`fit`). Pixel art loses detail when it becomes smaller,
-but an image that is cut loses more: the user sees only a part of it.
+An image keeps its own size: one pixel is one cell wide and half a cell tall (JP,
+2026-11-20). A tall image scrolls with the transcript, as a long message does. The one
+exception is an image that is wider than the lane: it becomes smaller to fit the width
+(refer to :func:`fit`), because an image that is cut shows only a part of it. MCOimg
+images are 10 to 30 pixels wide in practice, so this is rare.
 
 On the picked message, ^U opens the image on a bare frame (:class:`ImageScreen`). There it
-becomes as large as the frame permits, by a whole number, so each pixel stays square. When
-the ``show_mcoimg`` preference is off, the chat shows only the line about the image, and
-^U is the way to see it.
+becomes larger by a whole number when the frame has the room, so each pixel stays square,
+but it never becomes smaller than its own size. When the ``show_mcoimg`` preference is
+off, the chat shows only the line about the image, and ^U is the way to see it.
 """
 
 from __future__ import annotations
@@ -25,30 +27,12 @@ from rich.console import Group
 from rich.style import Style
 from rich.text import Text
 
-from ..platforms import Platform, on_platform
 from .tui.screen import ScrollScreen
 
 if TYPE_CHECKING:
     from ..core.mcoimg_decode import Picture
 
 RGB = tuple[int, int, int]
-
-#: The most rows that an image can use under a message, on the active platform. The frame
-#: takes some rows (the title bar, the footer, a header, the sender chip), so an image of
-#: this height and its message are visible together.
-_max_rows = 20
-
-#: The rows of a frame that an image does not get: the title bar, the header or footer,
-#: the sender chip, and the line of the message.
-_CHROME_ROWS = 4
-
-
-def _bind(platform: Platform) -> None:
-    global _max_rows
-    _max_rows = max(4, platform.readable_rows - _CHROME_ROWS)
-
-
-on_platform(_bind)
 
 
 @lru_cache(maxsize=128)
@@ -65,16 +49,19 @@ def decoded(body: str) -> Picture | None:
 
 
 def fit(
-    width: int, height: int, max_cols: int, max_rows: int, *, grow: bool = False
+    width: int, height: int, max_cols: int, max_rows: int | None = None, *, grow: bool = False
 ) -> tuple[int, int]:
     """The size in pixels at which to draw an image of ``width`` × ``height``.
 
     The image keeps its proportions, and becomes smaller only to fit ``max_cols`` cells and
-    ``max_rows`` rows (two pixels in each row). With ``grow``, an image that is smaller than
-    that space becomes larger by the largest whole number that fits. Thus each pixel of the
-    image is the same number of cells.
+    ``max_rows`` rows (two pixels in each row). ``None`` rows is no limit on the height:
+    then only the width can make the image smaller. With ``grow``, an image that is smaller
+    than that space becomes larger by the largest whole number that fits. Thus each pixel
+    of the image is the same number of cells.
     """
-    scale = min(max_cols / width, (max_rows * 2) / height)
+    scale = max_cols / width
+    if max_rows is not None:
+        scale = min(scale, (max_rows * 2) / height)
     if scale >= 1:
         scale = int(scale) if grow else 1
     return max(1, int(width * scale)), max(1, int(height * scale))
@@ -94,15 +81,15 @@ def picture_text(
         picture: The decoded image.
         max_cols: The most cells that the image can use, after the indent.
         indent: The cells of page before each line (the indent of the body of a message).
-        max_rows: The most rows that the image can use. ``None`` is the rows that the
-            platform gives an image under a message.
+        max_rows: The most rows that the image can use, or ``None`` for no limit (the
+            image under a message: a tall image scrolls with the transcript).
         grow: Make a small image larger to fill the space (refer to :func:`fit`).
 
     Returns:
         One :class:`~rich.text.Text` with a line for each two rows of pixels. It has no
         newline after the last line.
     """
-    rows_cap = _max_rows if max_rows is None else max(1, max_rows)
+    rows_cap = None if max_rows is None else max(1, max_rows)
     cols, rows = fit(picture.width, picture.height, max(1, max_cols), rows_cap, grow=grow)
     pixel = _sampler(picture, cols, rows)
     text = Text(no_wrap=True)
@@ -173,12 +160,17 @@ class ImageScreen(ScrollScreen):
     each side and at least one row above and below, as a QR code keeps its quiet zone. The
     frame puts the block a little above the true centre, as it does for a code.
 
+    The image never becomes smaller than its own size (JP, 2026-11-20), except to fit the
+    width of the frame. On a frame that has the room, it grows by the largest whole number
+    that holds it with its text, or else alone. An image that is taller than the frame
+    (on the 14 rows of the Cardputer, a 30-pixel image) starts at the top of the page, and
+    the arrows scroll it.
+
     The text of the message has no spaces, so it breaks at the width of the image area,
     into a block of lines that is centred as one. The text never makes the image smaller
-    than the size that it has alone on the frame (or its own size, when the frame is
-    larger than that): the text can only stop it from growing. When the frame cannot hold
-    both, the image gets the rows, and the text is under it, a page down, as the URL of a
-    large QR code is. On the 14 rows of the Cardputer, this is the case for most images.
+    than the size that it has alone on the frame: the text can only stop it from growing.
+    When the frame cannot hold both, the image gets the rows, and the text is under it, a
+    page down, as the URL of a large QR code is.
     """
 
     bare = True
@@ -207,14 +199,19 @@ class ImageScreen(ScrollScreen):
         alone = max(1, rows - _MARGIN_ROWS - 2)
         art_rows = max(1, alone - (1 + len(raw_lines) if raw_lines else 0))
         size = (picture.width, picture.height)
-        # The width that the image has without the text, but never more than its own: the
-        # text can stop it from growing, never make it smaller than that.
-        target = fit(*size, art_cols, alone)[0]
-        if fit(*size, art_cols, art_rows, grow=True)[0] < target:
-            art_rows = alone  # the text goes a page down
-        cols, _ = fit(picture.width, picture.height, art_cols, art_rows, grow=True)
+        # The smallest that the image can be: its own size, or less only to fit the width.
+        least = fit(*size, art_cols)[0]
+        # The largest that it can be without the text: the text can stop it from growing,
+        # but never make it smaller than that.
+        alone_cols = max(least, fit(*size, art_cols, alone, grow=True)[0])
+        limit: int | None = art_rows
+        if fit(*size, art_cols, art_rows, grow=True)[0] < alone_cols:
+            limit = alone  # the text goes a page down
+        if fit(*size, art_cols, limit, grow=True)[0] < least:
+            limit = None  # taller than the frame: its own size, and the page scrolls
+        cols, _ = fit(*size, art_cols, limit, grow=limit is not None)
         indent = max(0, (width - cols) // 2)
-        art = picture_text(picture, art_cols, indent=indent, max_rows=art_rows, grow=True)
+        art = picture_text(picture, art_cols, indent=indent, max_rows=limit, grow=True)
         caption = self._caption.copy()
         caption.justify = "center"
         parts = [art, Text(""), caption]

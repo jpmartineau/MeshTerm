@@ -397,3 +397,28 @@ def test_a_real_image_decodes_to_its_pixels() -> None:
         (254, 41, 7): 13,  # the red crest
         (181, 157, 2): 1,  # the eye
     }
+
+
+def test_an_image_keeps_its_own_size_on_a_small_frame() -> None:
+    """The woodpecker stays 30 x 30 in the transcript and on the full screen of 53 x 14.
+
+    It is taller than the 14 rows of the Cardputer, so it scrolls. It never becomes
+    smaller (JP, 2026-11-20). Only a frame with more room makes it larger.
+    """
+    import re
+
+    from meshterm.ui.pixelart import ImageScreen, picture_text
+    from meshterm.ui.tui.frame import compose_bare
+    from meshterm.ui.widgets import pixel_image_text
+
+    picture = decode(_WOODPECKER)
+    assert picture is not None
+    inline = picture_text(picture, 42).plain.split("\n")
+    assert len(inline) == 15 and {len(line) for line in inline} == {30}
+
+    screen = ImageScreen(picture, pixel_image_text(recognize(_WOODPECKER)), _WOODPECKER)
+    for _ in range(2):
+        compose_bare(screen, 53, 14)
+    page = [re.sub(r"\x1b\[[0-9;]*m", "", line).strip() for line in screen.render_body(53)]
+    art = [line for line in page if line and set(line) <= set("▀▄█")]
+    assert len(art) == 15 and {len(line) for line in art} == {30}
