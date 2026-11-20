@@ -556,7 +556,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   📤 send now · 📨 courier/queue · 💬 chat · 🔔 notify · 🔕 mute (notifications off) ·
   📱 QR · 🔗 link · ↻ re-read · ↕ reorder · ⇄ reverse (flip a path's direction) ·
   🔖 region/scope · 📌 rooms · 🏆 trophy case/record · ⌨ command line · 📖 read/about · 💰 support/donate ·
-  🚪 quit. Packet-class icons (feed/viewer
+  🎨 pixel image (an MCOimg picture in a message) · 🚪 quit. Packet-class icons (feed/viewer
   lane): 📢 advert · 📊 telemetry · 📦 packet · 💬 message · ✅ ack. Raw payload
   classes (`PAYLOAD_ICONS`): 📻 channel text · 💽 channel data · 📩 direct message
   (overheard) · 📥 request · 📮 response · 🎭 anon request · 🧭 path · 🎯 trace ·

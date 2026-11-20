@@ -25,7 +25,7 @@ from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from ..core import links
+from ..core import links, mcoimg
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
@@ -61,6 +61,7 @@ from .widgets import (
     mention_hop,
     mention_mark,
     picked_hop,
+    pixel_image_text,
     self_chip,
 )
 
@@ -912,10 +913,11 @@ class ChatScreen(Screen):
         """
         tolerance = self._tolerance_s
         corrected = message.corrected(tolerance)
+        image = mcoimg.recognize(body)
         stamp = message.shown_at(tolerance).astimezone()
         prefix = Text()
         prefix.append("❯ " if selected else "  ", style="cursor" if selected else None)
-        if self._names_us(body):
+        if image is None and self._names_us(body):
             prefix.append_text(mention_mark(self._self_key))
             prefix.append(" ")
         else:
@@ -926,7 +928,7 @@ class ChatScreen(Screen):
         else:
             prefix.append(" ")
         prefix.append(" ")
-        body_text = self._body_text(body, message, selected=selected)
+        body_text = self._body_text(body, message, selected=selected, image=image)
         whole = [m.span() for m in _WORD.finditer(body_text.plain) if links.urls(m.group())]
         # A mention is a chip, and a chip never breaks across two lines.
         whole += [(s.start, s.end) for s in body_text.spans if str(s.style) == PATH_INK]
@@ -943,14 +945,28 @@ class ChatScreen(Screen):
             )
             indent = prefix.cell_len
             lines += render_hanging(Text(" " * indent), note, width, indent=indent)
-        urls = links.urls(body) if _URL_CODES else []
+        urls = links.urls(body) if _URL_CODES and image is None else []
         if urls:
             lines += render_lines(qr_strip(urls, width, indent=prefix.cell_len), width)
         return lines
 
-    def _body_text(self, body: str, message: ChatMessage, *, selected: bool) -> Text:
-        """Build the styled body of a message: mentions in colour, then the glyphs at the end."""
-        text = self._render_mentions(body, selected=selected)
+    def _body_text(
+        self,
+        body: str,
+        message: ChatMessage,
+        *,
+        selected: bool,
+        image: mcoimg.PixelImage | None = None,
+    ) -> Text:
+        """Build the styled body of a message: mentions in colour, then the glyphs at the end.
+
+        A body that is a pixel image (``image``) shows a short line in place of its Base91
+        text (refer to :func:`~meshterm.ui.widgets.pixel_image_text`).
+        """
+        if image is not None:
+            text = pixel_image_text(image, style="cursor" if selected else "muted")
+        else:
+            text = self._render_mentions(body, selected=selected)
         if message.outbound:
             # A direct message shows its own delivery (spinner → ✓/✗, and a retry is
             # possible). A channel broadcast has no ack. Thus mark only a channel message

@@ -852,6 +852,7 @@ _GLYPH_MAP: dict[str, str] = {
     "🔔": "•",   # notify: the badge dot
     "🔕": "·",   # mute: the hollowed-out dot
     "📱": "▓",   # QR: a dense block
+    "🎨": "░",   # pixel image (MCOimg): a fine grid of dots
     "🔗": "&",   # link: the joining glyph
     "🏆": "★",   # trophy case: the best/winner star
     "⌨": "❯",   # command line: the prompt pointer

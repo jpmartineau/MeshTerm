@@ -204,6 +204,7 @@ and in quoted text.
 | packet | One radio transmission | frame (for radio data) |
 | protocol frame | One unit of the companion protocol on USB, Bluetooth, or TCP: a command, a reply, or a push from the companion. In code that handles only this protocol, "frame" alone is permitted | packet (for this) |
 | message | A text message, direct or on a channel | |
+| pixel image | A very small picture in the MCOimg format that a message carries as text (`im3:` and Base91 characters) | picture, MCOimg image |
 | sender time | The time that a message or an advert carries, from the clock of the node that sent it. It is a claim, and a node with a wrong clock makes it false | timestamp (alone) |
 | arrival time | Our clock when MeshTerm got a received message from the companion (`received_at`) | receive time |
 | clock offset | The sender time minus the arrival time. A positive offset is a clock ahead of ours. The offset of a node is the median of its three newest clock samples | skew, drift (for this) |

@@ -64,6 +64,7 @@ from .theme import glyph, mark_rgb, name_style, node_style, snr_style
 
 if TYPE_CHECKING:
     from ..core.discovery import DiscoveredDevice
+    from ..core.mcoimg import PixelImage
     from ..core.regions import Scope
 
 
@@ -97,6 +98,35 @@ def channel_glyph(name: str, secret: bytes | None) -> str:
 
 #: The concept icon for a region (the scope of a flood). Refer to the icon table of ``CLAUDE.md``.
 REGION_ICON = "🔖"
+
+#: The concept icon for a pixel image in a message (MCOimg). It is the palette of pixel
+#: art. ``🖼`` is not used, because it is a text character by default and terminals do
+#: not agree about its width.
+IMAGE_ICON = "🎨"
+
+
+def pixel_image_text(image: PixelImage, *, style: str | None = "muted") -> Text:
+    """The short line that a message shows in place of the Base91 text of a pixel image.
+
+    The Base91 text is noise to the user. Its ``@[``, ``]``, and ``.`` characters can also
+    look like a mention or a link. Thus the chat and the Messages list show this line in
+    its place: ``🎨 image · 24×24 · 16 colours`` when MeshTerm can read the header of the
+    image, or else the version of the format.
+
+    Args:
+        image: The image that :func:`~meshterm.core.mcoimg.recognize` found in the body.
+        style: The style of the line: ``muted``, or ``cursor`` on the selected message.
+    """
+    parts = [f"{glyph(IMAGE_ICON)} image"]
+    if image.width is not None and image.height is not None:
+        parts.append(f"{image.width}×{image.height}")
+        if image.colours is not None:
+            parts.append(f"{image.colours} colours")
+    elif image.version is None:
+        parts.append("MCOimg v1/v2")
+    else:
+        parts.append(f"MCOimg v{image.version}")
+    return Text(" · ".join(parts), style=style)
 
 
 def scope_text(scope: Scope | None, *, bare: bool = False) -> Text:

@@ -490,6 +490,12 @@ def test_preview_draws_the_author_and_the_mentions_as_the_transcript_does(powerl
     assert _preview_text(named, _NO_KEYS, us=us).plain == f"{author} hi {me}"
 
 
+def test_preview_shows_a_pixel_image_as_a_short_line() -> None:
+    """The Base91 text of an MCOimg image is noise, so the preview shows what it is."""
+    image = ChatMessage(text="Bob: im3:g/5WjAL`NA", is_channel=True, channel_idx=0)
+    assert _preview_text(image, _NO_KEYS).plain.endswith("image · 4×2 · 4 colours")
+
+
 def test_preview_keeps_the_whole_message() -> None:
     """The preview is built whole. The cut of the row is the part that the ←→ scroll passes."""
     long = ChatMessage(text="x" * 300, is_channel=True, channel_idx=0)
@@ -970,6 +976,17 @@ def test_chat_screen_shows_delivery_glyphs() -> None:
     # For a failed message, the footer hint names the retry shortcut (in the app-wide
     # compact ^ notation for Ctrl chords).
     assert "^R" in screen.footer_hint
+
+
+def test_a_pixel_image_shows_a_short_line_not_its_text() -> None:
+    """A body that is an MCOimg image shows its size in place of its Base91 text."""
+    text = "im3:g/5WjAL`NA"
+    messages = [ChatMessage(text=text, peer="d4e5f6a7")]
+    screen = _screen(_StubSession(), send=None, messages=messages)
+    lines = [_strip_ansi(ln) for ln in screen._body_lines(text, messages[0], 60)]
+    assert len(lines) == 1
+    assert lines[0].endswith("image · 4×2 · 4 colours")
+    assert "g/5W" not in lines[0]
 
 
 def test_wrapped_body_hangs_under_the_first_line() -> None:

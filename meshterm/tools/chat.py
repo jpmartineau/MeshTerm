@@ -27,7 +27,7 @@ from rich.cells import cell_len
 from rich.text import Text
 
 from ..context import AppContext
-from ..core import exitcodes
+from ..core import exitcodes, mcoimg
 from ..core.channels import (
     CHANNEL_SLOT_PROBE_CAP,
     DEFAULT_PUBLIC_SECRET,
@@ -71,6 +71,7 @@ from ..ui.widgets import (
     format_age,
     mention_chip,
     mention_mark,
+    pixel_image_text,
     self_chip,
 )
 from .base import Tool, ToolResult, register
@@ -1191,7 +1192,14 @@ def _append_body(
     refer to :func:`~meshterm.ui.widgets.mention_chip`). It takes the node grey when the
     name resolves to no node that we know. A mention of our own name (``us``) has the chip
     of our key with a white label, as in the transcript.
+
+    A body that is a pixel image shows the short line of the transcript in place of its
+    Base91 text (refer to :func:`~meshterm.ui.widgets.pixel_image_text`).
     """
+    image = mcoimg.recognize(body)
+    if image is not None:
+        text.append_text(pixel_image_text(image))
+        return
     pos = 0
     for match in MENTION.finditer(body):
         if match.start() > pos:
@@ -1209,7 +1217,12 @@ def _append_body(
 def _names_us(last: ChatMessage, us: tuple[str | None, str | None]) -> bool:
     """Whether the message ``last`` has a mention of our name (``us``)."""
     name = us[0]
-    return bool(name) and any(match.group(1) == name for match in MENTION.finditer(last.text))
+    if not name:
+        return False
+    body = split_channel_sender(last.text)[1] if last.is_channel and not last.outbound else last.text
+    if mcoimg.recognize(body) is not None:
+        return False  # the Base91 text of an image can hold an ``@[`` by chance
+    return any(match.group(1) == name for match in MENTION.finditer(body))
 
 
 def _ago(when: Any) -> str:
