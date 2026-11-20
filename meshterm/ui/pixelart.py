@@ -12,7 +12,7 @@ but an image that is cut loses more: the user sees only a part of it.
 
 On the picked message, ^U opens the image on a bare frame (:class:`ImageScreen`). There it
 becomes as large as the frame permits, by a whole number, so each pixel stays square. When
-the ``chat_images`` preference is off, the chat shows only the line about the image, and
+the ``show_mcoimg`` preference is off, the chat shows only the line about the image, and
 ^U is the way to see it.
 """
 

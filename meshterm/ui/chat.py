@@ -393,7 +393,7 @@ class ChatScreen(Screen):
         self._render_cache: dict | None = None
         # The clock tolerance of the last render: which times show as corrected.
         self._tolerance_s = clock_tolerance_s()
-        # Whether the last render drew the pixel images (the ``chat_images`` preference).
+        # Whether the last render drew the pixel images (the ``show_mcoimg`` preference).
         self._show_images = True
         # Strong references to the sends, resends, and spinner tickers that a key handler
         # starts. The event loop holds only a *weak* reference. Thus the garbage collector
@@ -684,7 +684,7 @@ class ChatScreen(Screen):
         locks = self._pages.locked_keys() if self._pages is not None else frozenset()
         tolerance = clock_tolerance_s()
         self._tolerance_s = tolerance
-        images = bool(preferences.current().chat_images)
+        images = bool(preferences.current().show_mcoimg)
         self._show_images = images
         if (
             cache is not None
@@ -1367,7 +1367,7 @@ class ChatScreen(Screen):
         """Show the pixel image of the selected message on a bare frame (^U).
 
         The image is as large as the frame permits (refer to
-        :class:`~meshterm.ui.pixelart.ImageScreen`). When the ``chat_images`` preference is
+        :class:`~meshterm.ui.pixelart.ImageScreen`). When the ``show_mcoimg`` preference is
         off, this is the way to see an image. When it is on, this is the large view.
 
         Returns:

@@ -328,7 +328,7 @@ deliberately, one at a time, and say why in the code.
   and URL can't share the frame the code is whole at the top and the URL a page down.
   A picked message that is a pixel image (MCOimg, `ui/pixelart.py`) opens its image on the
   same bare frame instead, grown by a whole number to fill it (`ImageScreen`; the chip
-  reads `Image`, the hint `^U image`); with `chat_images` off, that is the only view.
+  reads `Image`, the hint `^U image`); with `show_mcoimg` off, that is the only view.
   A chat message's links open there too, on every platform: ^U on the picked message,
   and with several, one code at a time that ←→ step through, clamped. That screen's URL
   line is flanked `←`/`→`, lit toward another code and dim at an end — the one mark the

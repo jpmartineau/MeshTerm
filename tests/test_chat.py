@@ -991,13 +991,13 @@ def test_a_pixel_image_shows_a_short_line_not_its_text() -> None:
     assert lines[1].strip() and set(lines[1].strip()) <= set("▀▄█")
 
 
-def test_with_chat_images_off_the_image_is_behind_ctrl_u(monkeypatch) -> None:
-    """With ``chat_images`` off, only the line shows, and ^U on the picked image opens it."""
+def test_with_show_mcoimg_off_the_image_is_behind_ctrl_u(monkeypatch) -> None:
+    """With ``show_mcoimg`` off, only the line shows, and ^U on the picked image opens it."""
     from meshterm.core import preferences
     from meshterm.ui.pixelart import ImageScreen
 
     prefs = preferences.Preferences()
-    prefs.set("chat_images", False)
+    prefs.set("show_mcoimg", False)
     monkeypatch.setattr(preferences, "current", lambda: prefs)
     text = "im3:g/5WjAL`NA"
     messages = [ChatMessage(text=text, peer="d4e5f6a7")]
