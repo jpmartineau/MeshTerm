@@ -356,7 +356,7 @@ def _tour(p: Presenter) -> None:
 
     print("the main menu", flush=True)
     p.camera.roll()
-    p.hold(3.0)
+    p.hold(2.5)
 
     print("the chat, and the paths of a message", flush=True)
     p.type("chat")
@@ -405,7 +405,7 @@ def _tour(p: Presenter) -> None:
     # Dave answers a few seconds later (``meshterm.demo.script.REPLIES``). His answer
     # mentions our node, so it has our star.
     p.wait_for("be there at 2", timeout=30)
-    p.hold(3.5)
+    p.hold(3.0)
 
     print("a trace", flush=True)
     _menu(p, "trace t")
@@ -415,14 +415,14 @@ def _tour(p: Presenter) -> None:
     p.hold(0.4)
     p.key("enter")
     p.wait_for("Trace — Brossard")
-    p.hold(2.0)
+    p.hold(1.5)
     p.key("enter", pause=0.0)
     p.wait_for("Per-hop medians", timeout=30)
     p.hold(1.0)
     # The history stores walks of one byte for each hop. Thus this walk of two bytes is new,
     # and its records go to the trophy case.
     if p.shows("new record"):
-        p.hold(3.0)
+        p.hold(2.5)
         p.key("enter", pause=0.0)  # Close
         p.hold(1.5)
     p.key("pagedown", pause=0.0)

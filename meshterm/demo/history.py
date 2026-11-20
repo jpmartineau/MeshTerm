@@ -49,6 +49,13 @@ TX_POWER = 22
 #: The map viewport that the demo opens on: the island of Montréal, with the two shores.
 MAP_VIEW = (45.5150, -73.5900, 10)
 
+#: The channel slots whose history draws from the one source of chance of the history. A
+#: channel in a later slot draws from a source of its own, seeded by its name. Thus a
+#: channel added to the demo never changes the rest of it: the shared source gives the same
+#: numbers to everything after the conversations (the traces, the neighbours), and the
+#: video's trace to Brossard keeps the route that it was made for.
+_SHARED_SLOTS = 4
+
 
 def seed(repo: Repository, now: datetime) -> None:
     """Write the full history of the demo into ``repo``.
@@ -128,8 +135,13 @@ def _conversations(
     """
     messages: list[ChatMessage] = []
     heard: list[traffic.Heard] = _greetings(rng)
+    shared = rng
     for channel in world.CHANNELS:
         identity = channel_identity(channel.name, channel.secret)
+        if channel.slot < _SHARED_SLOTS:
+            rng = shared
+        else:
+            rng = random.Random(f"meshterm-demo/history/{channel.name}")
         for line in script.CHANNEL_LINES.get(channel.name, ()):
             offset = -line.age_min * 60.0
             sender = world.node(line.sender)
@@ -165,6 +177,7 @@ def _conversations(
                     created_at=when,
                 )
             )
+    rng = shared
     for peer_name, lines in script.DIRECT_LINES.items():
         peer = world.node(peer_name)
         for line in lines:
@@ -242,26 +255,55 @@ def _greetings(rng: random.Random) -> list[traffic.Heard]:
     spoke a few minutes ago was also heard a few minutes ago, and the lists show it as
     recent. The function adds one advert before the first line of each sitting in the last
     two days (a sitting is a run of lines less than an hour apart).
+
+    The lines of the channels in the shared slots and of the direct messages draw from
+    ``rng``, as they always did. The lines of a later channel come in a second pass, with a
+    source of their own (refer to :data:`_SHARED_SLOTS`). Thus a channel added to the demo
+    does not change the adverts, or anything after them, of the rest of the history.
     """
-    lines = [
-        line
-        for group in (script.CHANNEL_LINES, script.DIRECT_LINES)
-        for conversation in group.values()
-        for line in conversation
-        if line.sender != script.ME and line.age_min < 2 * 1440
-    ]
+    slots = {channel.name: channel.slot for channel in world.CHANNELS}
+
+    def recent(conversations) -> list:  # noqa: ANN001 - the values of a dict of lines
+        return [
+            line
+            for conversation in conversations
+            for line in conversation
+            if line.sender != script.ME and line.age_min < 2 * 1440
+        ]
+
+    shared = recent(
+        [
+            lines
+            for name, lines in script.CHANNEL_LINES.items()
+            if slots.get(name, _SHARED_SLOTS) < _SHARED_SLOTS
+        ]
+        + list(script.DIRECT_LINES.values())
+    )
+    later = recent(
+        [
+            lines
+            for name, lines in script.CHANNEL_LINES.items()
+            if slots.get(name, _SHARED_SLOTS) >= _SHARED_SLOTS
+        ]
+    )
     last_advert: dict[str, float] = {}
     heard: list[traffic.Heard] = []
-    for line in sorted(lines, key=lambda line: -line.age_min):
-        offset = -line.age_min * 60.0
-        if offset - last_advert.get(line.sender, -1e12) < 3600.0:
-            continue
-        sender = world.node(line.sender)
-        moment = offset - rng.uniform(60.0, 900.0)
-        heard.extend(
-            traffic.heard_flood(sender, moment, traffic.advert_body(sender), rng, advert=True)
-        )
-        last_advert[line.sender] = offset
+    for lines, source in (
+        (shared, rng),
+        (later, random.Random("meshterm-demo/history/greetings")),
+    ):
+        for line in sorted(lines, key=lambda line: -line.age_min):
+            offset = -line.age_min * 60.0
+            if abs(offset - last_advert.get(line.sender, -1e12)) < 3600.0:
+                continue
+            sender = world.node(line.sender)
+            moment = offset - source.uniform(60.0, 900.0)
+            heard.extend(
+                traffic.heard_flood(
+                    sender, moment, traffic.advert_body(sender), source, advert=True
+                )
+            )
+            last_advert[line.sender] = offset
     return heard
 
 

@@ -188,3 +188,36 @@ def test_a_mentioned_node_answers(monkeypatch) -> None:  # noqa: ANN001 - the py
     assert [m.text for m in messages] == [f"Dave-Lachine: {script.REPLIES['Dave-Lachine']}"]
     assert messages[0].is_channel and messages[0].channel == 0
     assert f"@[{world.SELF.name}]" in messages[0].text
+
+
+def test_a_later_channel_leaves_the_rest_of_the_history_unchanged(monkeypatch) -> None:  # noqa: ANN001
+    """A channel after the shared slots draws from its own source of chance.
+
+    The history draws the conversations, then the traces and the neighbours, from one
+    source. When the ``#mcoimg`` channel took numbers from it, the route that the trace
+    of the video learns moved off Mont-Royal, and the trace to Brossard got no reply. So
+    the shared source must end the conversations in the same state with that channel and
+    without it, and so must it after the greetings, which read the lines of each channel.
+    """
+    import random
+
+    from meshterm.demo import script
+
+    now = utcnow()
+
+    def state_after_conversations() -> tuple:
+        rng = random.Random("meshterm-demo/history")
+        history._conversations(now, rng)
+        return rng.getstate()
+
+    assert any(c.slot >= history._SHARED_SLOTS for c in world.CHANNELS)  # else it proves nothing
+    with_channel = state_after_conversations()
+    monkeypatch.setattr(
+        world, "CHANNELS", tuple(c for c in world.CHANNELS if c.slot < history._SHARED_SLOTS)
+    )
+    monkeypatch.setattr(
+        script,
+        "CHANNEL_LINES",
+        {name: lines for name, lines in script.CHANNEL_LINES.items() if name != "#mcoimg"},
+    )
+    assert state_after_conversations() == with_channel
