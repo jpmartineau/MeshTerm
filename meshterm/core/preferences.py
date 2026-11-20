@@ -601,7 +601,7 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     ),
     PrefSpec(
         key="show_mcoimg",
-        label="Chat images",
+        label="Show MCOimg",
         help="Draw the pixel images of messages. Off: ^U shows one",
         group="Display",
         value_type="bool",
