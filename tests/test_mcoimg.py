@@ -361,3 +361,39 @@ def test_the_image_screen_shows_the_text_of_the_message_under_the_caption() -> N
     lines = [re.sub(r"\x1b\[[0-9;]*m", "", line).strip() for line in frame.split("\n")]
     caption = next(i for i, line in enumerate(lines) if "image · 9×7 · 2 colours" in line)
     assert text in lines[caption + 1 :]
+
+
+#: A real image, from an MCOimg encoder and not from the small encoder of these tests: a
+#: woodpecker on a green ground, 30 x 30, in 74 bytes. It uses the 512-colour dynamic
+#: profile and the compact regions stream with three regions, which the reference vectors
+#: test only on very small images. The pixels below were checked by eye (2026-11-20).
+_WOODPECKER = (
+    'im3:J!jBVY"9UPkugAX54#9BX:e"FM|cL0G|IS.@$q^=N:4D*B9d1d$450M>W/tOqmq`wqd..bJp|}'
+    "d/4v2vpi5BAZ9wD/B"
+)
+
+
+def test_a_real_image_decodes_to_its_pixels() -> None:
+    """The woodpecker decodes to its size, its profile, and the same pixels each time."""
+    import hashlib
+    from collections import Counter
+
+    assert recognize(_WOODPECKER) == PixelImage(3, 30, 30, 512)
+    indexed = _decode_refs(_WOODPECKER)
+    assert indexed is not None
+    assert indexed.profile == 15  # dynamicGlobal512
+    assert indexed.transparent is None
+    refs = b"".join(ref.to_bytes(2, "little") for ref in indexed.refs)
+    assert hashlib.sha256(refs).hexdigest() == (
+        "38a9e47e914e2897fa54e054fb3f0b580c88c8b9df67a2b818a1a7ea68e1bd28"
+    )
+    picture = decode(_WOODPECKER)
+    assert picture is not None
+    assert Counter(picture.pixels) == {
+        (168, 225, 139): 726,  # the green ground
+        (0, 0, 0): 118,  # the black body
+        (255, 255, 255): 23,  # the white stripes
+        (79, 79, 79): 19,  # the grey beak and feet
+        (254, 41, 7): 13,  # the red crest
+        (181, 157, 2): 1,  # the eye
+    }
