@@ -175,8 +175,10 @@ class ImageScreen(ScrollScreen):
 
     The text of the message has no spaces, so it breaks at the width of the image area,
     into a block of lines that is centred as one. The text never makes the image smaller
-    than its own size. When the frame cannot hold both at that size, the image gets the
-    rows, and the text is under it, a page down, as the URL of a large QR code is.
+    than the size that it has alone on the frame (or its own size, when the frame is
+    larger than that): the text can only stop it from growing. When the frame cannot hold
+    both, the image gets the rows, and the text is under it, a page down, as the URL of a
+    large QR code is. On the 14 rows of the Cardputer, this is the case for most images.
     """
 
     bare = True
@@ -205,7 +207,10 @@ class ImageScreen(ScrollScreen):
         alone = max(1, rows - _MARGIN_ROWS - 2)
         art_rows = max(1, alone - (1 + len(raw_lines) if raw_lines else 0))
         size = (picture.width, picture.height)
-        if fit(*size, art_cols, art_rows, grow=True) < size <= fit(*size, art_cols, alone):
+        # The width that the image has without the text, but never more than its own: the
+        # text can stop it from growing, never make it smaller than that.
+        target = fit(*size, art_cols, alone)[0]
+        if fit(*size, art_cols, art_rows, grow=True)[0] < target:
             art_rows = alone  # the text goes a page down
         cols, _ = fit(picture.width, picture.height, art_cols, art_rows, grow=True)
         indent = max(0, (width - cols) // 2)

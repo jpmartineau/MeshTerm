@@ -804,6 +804,35 @@ def _chat_long_url(cols: int, rows: int) -> Screen:
     return screen
 
 
+#: A real MCOimg image: a woodpecker, 30 x 30, in 74 bytes (refer to tests/test_mcoimg.py).
+_WOODPECKER = (
+    'im3:J!jBVY"9UPkugAX54#9BX:e"FM|cL0G|IS.@$q^=N:4D*B9d1d$450M>W/tOqmq`wqd..bJp|}'
+    "d/4v2vpi5BAZ9wD/B"
+)
+
+
+def _chat_image(cols: int, rows: int, *, picked: bool = False) -> Screen:
+    """A channel message that is a pixel image: its caption, and the image in half blocks.
+
+    The image is 30 pixels wide, so it fits after the indent of the body on each platform
+    (44 cells on the PicoCalc), and it is 15 rows tall. With ``picked``, the image message
+    is selected, so the hint names ``^U image`` and the lane lights ``Image``.
+    """
+    conv = Conversation(label="Lakeside art", is_channel=True, channel_idx=3)
+    messages = [
+        ChatMessage(text="Alice: drew this on the trail today", is_channel=True),
+        ChatMessage(text=f"Alice: {_WOODPECKER}", is_channel=True),
+    ]
+    screen = ChatScreen(conv, messages, send=None, names={}, session=_GallerySession(cols, rows))
+    if picked:
+        screen.handle("up")
+    return screen
+
+
+def _chat_image_picked(cols: int, rows: int) -> Screen:
+    return _chat_image(cols, rows, picked=True)
+
+
 class _PickerChat:
     """The unread counter that the rows of the picker read live."""
 
@@ -1927,6 +1956,15 @@ def _links_qr(cols: int, rows: int) -> Screen:
     )
 
 
+def _image_screen(cols: int, rows: int) -> Screen:
+    """The ^U view of a pixel image: the image on a bare frame, its caption, and its text."""
+    from meshterm.core.mcoimg import recognize
+    from meshterm.ui.pixelart import ImageScreen, decoded
+    from meshterm.ui.widgets import pixel_image_text
+
+    return ImageScreen(decoded(_WOODPECKER), pixel_image_text(recognize(_WOODPECKER)), _WOODPECKER)
+
+
 def _clock_drift(cols: int, rows: int) -> Screen:
     """The Clock drift page in its fullest form: a managed node, nodes out of sync, a name.
 
@@ -2000,6 +2038,8 @@ _ENTRIES: list[_Entry] = [
     _Entry("chat_channel_scoped", _chat_channel_scoped),
     _Entry("chat_urls", _chat_urls),
     _Entry("chat_long_url", _chat_long_url),
+    _Entry("chat_image", _chat_image),
+    _Entry("chat_image_picked", _chat_image_picked),
     _Entry("chat_picker", _chat_picker),
     _Entry("room", _room),
     _Entry("room_read_only", _room_read_only),
@@ -2054,6 +2094,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("support_project", _support_project),
     _Entry("share_qr", _share_qr),
     _Entry("links_qr", _links_qr),
+    _Entry("image_screen", _image_screen),
     _Entry("diagnostics", _diagnostics),
     _Entry("diagnostics-anonymized", _diagnostics_anonymized),
 ]
