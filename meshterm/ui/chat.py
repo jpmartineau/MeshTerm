@@ -25,7 +25,7 @@ from rich.cells import cell_len
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from ..core import links, mcoimg
+from ..core import links, mcoimg, preferences
 from ..core.channels import MENTION, split_channel_sender
 from ..core.connection import ContactNotOnDeviceError
 from ..core.events import EventKind, MeshEvent
@@ -247,10 +247,10 @@ class ChatScreen(Screen):
         else:
             toggle = ("", "")
         lane[1] = FPair(
-            "URL→QR",
+            "Image" if self._picked_picture() is not None else "URL→QR",
             "url_code",
             *toggle,
-            enabled=bool(self._picked_urls()),
+            enabled=self._picked_picture() is not None or bool(self._picked_urls()),
             opp_enabled=lock is not None,
         )
         if self._locator is not None or self._pages is not None:
@@ -393,6 +393,8 @@ class ChatScreen(Screen):
         self._render_cache: dict | None = None
         # The clock tolerance of the last render: which times show as corrected.
         self._tolerance_s = clock_tolerance_s()
+        # Whether the last render drew the pixel images (the ``chat_images`` preference).
+        self._show_images = True
         # Strong references to the sends, resends, and spinner tickers that a key handler
         # starts. The event loop holds only a *weak* reference. Thus the garbage collector
         # can remove a task that nothing else names while it runs: the result is a message
@@ -442,7 +444,13 @@ class ChatScreen(Screen):
     def _hint_with(self, lock: str) -> str:
         """The key hint, with the ``lock`` atom after ``^O author`` (or no atom for ``""``)."""
         if self._selected is not None:
-            code = "^U QR" if self._picked_urls() else ""
+            code = (
+                "^U image"
+                if self._picked_picture() is not None
+                else "^U QR"
+                if self._picked_urls()
+                else ""
+            )
             where = "^L map" if self._locate_target() is not None else ""
             who = "^O author" if self._author_page() is not None else ""
             if self._is_channel and self._retry_target() is not None:
@@ -676,8 +684,11 @@ class ChatScreen(Screen):
         locks = self._pages.locked_keys() if self._pages is not None else frozenset()
         tolerance = clock_tolerance_s()
         self._tolerance_s = tolerance
+        images = bool(preferences.current().chat_images)
+        self._show_images = images
         if (
             cache is not None
+            and cache["images"] == images
             and cache["width"] == width
             and cache["spacing"] == spacing
             and cache["locks"] == locks
@@ -788,6 +799,7 @@ class ChatScreen(Screen):
             "spacing": spacing,
             "locks": locks,
             "tolerance": tolerance,
+            "images": images,
             "ids": ids,
             "acked": ackeds,
             "selected": selecteds,
@@ -950,7 +962,7 @@ class ChatScreen(Screen):
             )
             indent = prefix.cell_len
             lines += render_hanging(Text(" " * indent), note, width, indent=indent)
-        if image is not None:
+        if image is not None and self._show_images:
             picture = pixelart.decoded(body)
             if picture is not None:
                 indent = prefix.cell_len
@@ -1343,6 +1355,44 @@ class ChatScreen(Screen):
         message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
         return links.urls(self._sender_and_body(message)[1])
 
+    def _picked_picture(self) -> mcoimg.Picture | None:
+        """The pixel image of the selected message, or ``None`` (no selection, or no image)."""
+        if self._selected is None or not self._messages:
+            return None
+        message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
+        body = self._sender_and_body(message)[1]
+        return pixelart.decoded(body) if mcoimg.recognize(body) is not None else None
+
+    def _open_image(self) -> bool:
+        """Show the pixel image of the selected message on a bare frame (^U).
+
+        The image is as large as the frame permits (refer to
+        :class:`~meshterm.ui.pixelart.ImageScreen`). When the ``chat_images`` preference is
+        off, this is the way to see an image. When it is on, this is the large view.
+
+        Returns:
+            ``True`` when the selected message has an image, so that ^U does nothing more.
+        """
+        picture = self._picked_picture()
+        if picture is None:
+            return False
+        if self._codes_open:
+            return True
+        message = self._messages[max(0, min(self._selected or 0, len(self._messages) - 1))]
+        image = mcoimg.recognize(self._sender_and_body(message)[1])
+        caption = pixel_image_text(image) if image is not None else Text("")
+        self._codes_open = True
+
+        async def run() -> None:
+            try:
+                await self._session.run_screen(pixelart.ImageScreen(picture, caption))
+            finally:
+                self._codes_open = False
+                self._session.invalidate()
+
+        self._session.run_detached(run())
+        return True
+
     def _open_codes(self) -> None:
         """Show the links of the selected message as QR codes on the share screen (^U).
 
@@ -1353,6 +1403,8 @@ class ChatScreen(Screen):
         message, and when nothing is selected, the screen cannot know which message. One
         share screen at a time.
         """
+        if self._open_image():
+            return
         urls = self._picked_urls()
         if not urls or self._codes_open:
             return

@@ -600,6 +600,17 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         unit="s",
     ),
     PrefSpec(
+        key="chat_images",
+        label="Chat images",
+        help="Draw the pixel images of messages. Off: ^U shows one",
+        group="Display",
+        value_type="bool",
+        # On: a pixel image (MCOimg) is what its sender wanted the channel to see. Off: the
+        # chat shows only the line about the image, and ^U on the picked message opens it
+        # (JP, 2026-11-19). A 30 x 30 image takes 15 rows of the transcript.
+        default=True,
+    ),
+    PrefSpec(
         key="clock_report_days",
         label="Clock report",
         help="How many days of packets the Clock drift page reads",

@@ -311,3 +311,12 @@ def test_a_wide_picture_becomes_smaller_to_fit_the_lane() -> None:
     assert fit(64, 64, 40, 40) == (40, 40)
     assert fit(16, 16, 40, 40) == (16, 16)  # never larger
     assert fit(30, 30, 53, 5) == (10, 10)  # five rows hold ten pixels
+
+
+def test_the_image_screen_makes_a_small_image_larger() -> None:
+    """On its bare frame, a 4 x 2 image grows by a whole number to fill the frame."""
+    from meshterm.ui.pixelart import fit
+
+    assert fit(4, 2, 72, 22, grow=True) == (72, 36)  # 18 times: the width is the limit
+    assert fit(16, 16, 53, 24, grow=True) == (48, 48)  # 3 times: 24 rows hold 48 pixels
+    assert fit(4, 2, 72, 22) == (4, 2)  # under a message, never larger

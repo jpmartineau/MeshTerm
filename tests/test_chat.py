@@ -991,6 +991,41 @@ def test_a_pixel_image_shows_a_short_line_not_its_text() -> None:
     assert lines[1].strip() and set(lines[1].strip()) <= set("▀▄█")
 
 
+def test_with_chat_images_off_the_image_is_behind_ctrl_u(monkeypatch) -> None:
+    """With ``chat_images`` off, only the line shows, and ^U on the picked image opens it."""
+    from meshterm.core import preferences
+    from meshterm.ui.pixelart import ImageScreen
+
+    prefs = preferences.Preferences()
+    prefs.set("chat_images", False)
+    monkeypatch.setattr(preferences, "current", lambda: prefs)
+    text = "im3:g/5WjAL`NA"
+    messages = [ChatMessage(text=text, peer="d4e5f6a7")]
+    session = _StubSession()
+    opened = []
+
+    async def run_screen(screen):  # noqa: ANN001, ANN202
+        opened.append(screen)
+
+    session.run_screen = run_screen
+    screen = _screen(session, send=None, messages=messages)
+    screen._render_grouped(60)
+    lines = [_strip_ansi(ln) for ln in screen._body_lines(text, messages[0], 60)]
+    assert len(lines) == 1 and lines[0].endswith("image · 4×2 · 4 colours")
+
+    screen._selected = 0
+    assert screen.fkey_lane is not None
+    assert "^U image" in screen.footer_hint
+
+    async def press() -> None:
+        screen.handle("url_code")
+        await asyncio.sleep(0)
+
+    asyncio.run(press())
+    assert len(opened) == 1 and isinstance(opened[0], ImageScreen)
+    assert (opened[0].picture.width, opened[0].picture.height) == (4, 2)
+
+
 def test_wrapped_body_hangs_under_the_first_line() -> None:
     """A body that is too long for the width wraps with a hanging indent under its first line."""
     from datetime import datetime, timezone

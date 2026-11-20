@@ -9,6 +9,11 @@ bottom pixel is ``▄`` in that colour, and a cell with no pixel is a space.
 An image that is wider than the lane, or taller than the rows that the platform can give
 it, becomes smaller (refer to :func:`fit`). Pixel art loses detail when it becomes smaller,
 but an image that is cut loses more: the user sees only a part of it.
+
+On the picked message, ^U opens the image on a bare frame (:class:`ImageScreen`). There it
+becomes as large as the frame permits, by a whole number, so each pixel stays square. When
+the ``chat_images`` preference is off, the chat shows only the line about the image, and
+^U is the way to see it.
 """
 
 from __future__ import annotations
@@ -16,11 +21,13 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from rich.console import Group
 from rich.style import Style
 from rich.text import Text
 
 from ..core import mcoimg
 from ..platforms import Platform, on_platform
+from .tui.screen import ScrollScreen
 
 if TYPE_CHECKING:
     from ..core.mcoimg import Picture
@@ -55,29 +62,46 @@ def decoded(body: str) -> Picture | None:
     return mcoimg.decode(body)
 
 
-def fit(width: int, height: int, max_cols: int, max_rows: int) -> tuple[int, int]:
+def fit(
+    width: int, height: int, max_cols: int, max_rows: int, *, grow: bool = False
+) -> tuple[int, int]:
     """The size in pixels at which to draw an image of ``width`` × ``height``.
 
-    The image keeps its proportions. It never becomes larger, and it becomes smaller only
-    to fit ``max_cols`` cells and ``max_rows`` rows (two pixels in each row).
+    The image keeps its proportions, and becomes smaller only to fit ``max_cols`` cells and
+    ``max_rows`` rows (two pixels in each row). With ``grow``, an image that is smaller than
+    that space becomes larger by the largest whole number that fits. Thus each pixel of the
+    image is the same number of cells.
     """
-    scale = min(1.0, max_cols / width, (max_rows * 2) / height)
+    scale = min(max_cols / width, (max_rows * 2) / height)
+    if scale >= 1:
+        scale = int(scale) if grow else 1
     return max(1, int(width * scale)), max(1, int(height * scale))
 
 
-def picture_text(picture: Picture, max_cols: int, *, indent: int = 0) -> Text:
+def picture_text(
+    picture: Picture,
+    max_cols: int,
+    *,
+    indent: int = 0,
+    max_rows: int | None = None,
+    grow: bool = False,
+) -> Text:
     """Draw ``picture`` as lines of half blocks, each after ``indent`` spaces.
 
     Args:
         picture: The decoded image.
         max_cols: The most cells that the image can use, after the indent.
         indent: The cells of page before each line (the indent of the body of a message).
+        max_rows: The most rows that the image can use. ``None`` is the rows that the
+            platform gives an image under a message.
+        grow: Make a small image larger to fill the space (refer to :func:`fit`).
 
     Returns:
         One :class:`~rich.text.Text` with a line for each two rows of pixels. It has no
         newline after the last line.
     """
-    cols, rows = fit(picture.width, picture.height, max(1, max_cols), _max_rows)
+    rows_cap = _max_rows if max_rows is None else max(1, max_rows)
+    cols, rows = fit(picture.width, picture.height, max(1, max_cols), rows_cap, grow=grow)
     pixel = _sampler(picture, cols, rows)
     text = Text(no_wrap=True)
     for y in range(0, rows, 2):
@@ -122,3 +146,40 @@ def _hex(rgb: RGB | None) -> str:
     """The colour of a pixel as ``#rrggbb``."""
     r, g, b = rgb  # type: ignore[misc]
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+class ImageScreen(ScrollScreen):
+    """The pixel image of a message on a bare frame, as large as the frame permits (^U).
+
+    It is the share screen of a link (:class:`~meshterm.ui.qr.QrScreen`) for an image: no
+    header, no footer, no box, and no hint. Esc leaves, as it does everywhere. The image
+    fits itself to the frame at each paint, so a larger terminal shows a larger image. One
+    line under it gives its size and its colours, centred.
+    """
+
+    bare = True
+
+    def __init__(self, picture: Picture, caption: Text) -> None:
+        """Set up the screen for ``picture``, with ``caption`` under it.
+
+        Args:
+            picture: The decoded image.
+            caption: The line about the image, as the chat shows it.
+        """
+        super().__init__(Text(""), title="Image", floating=False)
+        self.picture = picture
+        self._caption = caption
+
+    def render_body(self, width: int) -> list[str]:
+        """The image as large as ``width`` and the frame rows permit, then its caption."""
+        # The frame notes its height before it asks for the body, as on the share screen.
+        rows = self._scroll_viewport
+        picture = self.picture
+        art_rows = max(1, rows - 2)  # a blank row and the caption
+        cols, _ = fit(picture.width, picture.height, width, art_rows, grow=True)
+        indent = max(0, (width - cols) // 2)
+        art = picture_text(picture, width, indent=indent, max_rows=art_rows, grow=True)
+        caption = self._caption.copy()
+        caption.justify = "center"
+        self.replace_content(Group(art, Text(""), caption))
+        return super().render_body(width)
