@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 
 from meshterm.core import mcoimg, mcoimg_palettes
-from meshterm.core.mcoimg import PixelImage, _decode_refs, base91_decode, decode, recognize
+from meshterm.core.mcoimg import PixelImage, base91_decode, recognize
+from meshterm.core.mcoimg_decode import Picture, _decode_refs, decode
 
 #: (text, width, height, colours) from the version 3 vectors: one case for each mode of
 #: the dimensions and for each palette profile that the vectors use.
@@ -298,7 +299,7 @@ def test_a_picture_draws_two_pixels_in_each_cell() -> None:
     from meshterm.ui.pixelart import picture_text
 
     red, blue = (255, 0, 0), (0, 0, 255)
-    picture = mcoimg.Picture(2, 3, (red, None, blue, red, red, None))
+    picture = Picture(2, 3, (red, None, blue, red, red, None))
     lines = picture_text(picture, 10, indent=2).plain.split("\n")
     # Row 0 over row 1: red over blue, nothing over red. Row 2 alone: red, nothing.
     assert lines == ["  ▀▄", "  ▀ "]

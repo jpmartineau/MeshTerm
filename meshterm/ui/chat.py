@@ -68,6 +68,7 @@ from .widgets import (
 
 if TYPE_CHECKING:
     from ..context import AppContext
+    from ..core.mcoimg_decode import Picture
     from ..services.message_paths import TraceWalk
     from .map_render import MapMarker
     from .map_screen import Locator
@@ -1355,7 +1356,7 @@ class ChatScreen(Screen):
         message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
         return links.urls(self._sender_and_body(message)[1])
 
-    def _picked_picture(self) -> mcoimg.Picture | None:
+    def _picked_picture(self) -> Picture | None:
         """The pixel image of the selected message, or ``None`` (no selection, or no image)."""
         if self._selected is None or not self._messages:
             return None

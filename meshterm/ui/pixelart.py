@@ -25,12 +25,11 @@ from rich.console import Group
 from rich.style import Style
 from rich.text import Text
 
-from ..core import mcoimg
 from ..platforms import Platform, on_platform
 from .tui.screen import ScrollScreen
 
 if TYPE_CHECKING:
-    from ..core.mcoimg import Picture
+    from ..core.mcoimg_decode import Picture
 
 RGB = tuple[int, int, int]
 
@@ -57,9 +56,12 @@ def decoded(body: str) -> Picture | None:
     """The image of a message body, or ``None``. It keeps the last results.
 
     A transcript paints many times while a message is visible. Each paint asks again, and
-    the cache answers without a second decode.
+    the cache answers without a second decode. The decoder is large, so it loads here, at
+    the first image, and not when the chat opens.
     """
-    return mcoimg.decode(body)
+    from ..core.mcoimg_decode import decode
+
+    return decode(body)
 
 
 def fit(
