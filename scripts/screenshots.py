@@ -6,7 +6,8 @@
 The script runs MeshTerm three times, one time for each set: ``terminal`` (the desktop, in
 an 80×24 terminal), ``cardputer-zero``, and ``picocalc-lyra``. Each run uses ``--demo``
 (refer to :mod:`meshterm.demo`) and types the same keys: it opens the chat on Public,
-the paths of a message, and the map, and it saves each screen as a PNG. The result is
+the paths of a message, the map, and the pixel images of the ``#mcoimg`` channel, and it
+saves each screen as a PNG. The result is
 ``DIR/<set>/<screen>.png`` (``DIR`` is ``docs/screenshots`` by default).
 
 The script also draws each wordmark of the startup splash (``meshterm/assets/splash``) as
@@ -361,6 +362,19 @@ def _tour(capture: Capture, type_text: Callable[[str], None], save: Callable[[st
     press("enter")
     capture.settle(quiet=4.0, timeout=120.0)
     save("map")
+    # The pixel images of the #mcoimg channel, from the main menu.
+    press(text="w", ctrl=True)
+    capture.settle(quiet=0.8)
+    press("escape")
+    typed("chat")
+    press("enter")
+    capture.wait_for("Public")
+    capture.settle()
+    typed("mcoimg")
+    press("enter")
+    capture.wait_for("#mcoimg")
+    capture.settle(quiet=1.5)
+    save("mcoimg")
 
 
 # --------------------------------------------------------------------------- drawing

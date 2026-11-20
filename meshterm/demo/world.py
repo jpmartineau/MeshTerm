@@ -610,12 +610,14 @@ class Channel:
 
 
 #: The channels of the demo device. ``Family`` is a private channel, with a fixed secret
-#: that is not derived from its name.
+#: that is not derived from its name. ``#mcoimg`` carries pixel images (MCOimg), so that
+#: the screenshots can show how the chat draws them.
 CHANNELS: tuple[Channel, ...] = (
     Channel(0, "Public", DEFAULT_PUBLIC_SECRET),
     Channel(1, "#montreal", derive_secret("#montreal"), scope="yul"),
     Channel(2, "#cycling", derive_secret("#cycling")),
     Channel(3, "Family", hashlib.sha256(b"meshterm-demo/Family").digest()[:16]),
+    Channel(4, "#mcoimg", derive_secret("#mcoimg")),
 )
 
 #: Hashtag channels that other people of the mesh use and our device does not have. Our

@@ -64,6 +64,19 @@ class Line:
 #: The sender name of our own lines.
 ME = SELF.name
 
+#: The pixel images (MCOimg) of the ``#mcoimg`` channel. The woodpecker is a real image
+#: from an MCOimg encoder (30 x 30, 74 bytes). The leaf and the smiley are not compressed:
+#: the small encoder of ``tests/test_mcoimg.py`` made them.
+WOODPECKER = (
+    'im3:J!jBVY"9UPkugAX54#9BX:e"FM|cL0G|IS.@$q^=N:4D*B9d1d$450M>W/tOqmq`wqd..bJp|}'
+    "d/4v2vpi5BAZ9wD/B"
+)
+MAPLE_LEAF = (
+    'im3:g/U"eLAAAAAAAAC"BAAAAA5JAAAA_98(AA|;umiCv(umb$1I~lb$O=2AB=0maToIumb$8(umb$O=:EY'
+    "$O=0mDAumb$NAAAumbAAAAAYAAAAA@QAAAAAAAAAAA"
+)
+SMILEY = 'im3:g/U"aLdZSA%ZpL[c%Z>M5wqOW0Dz9Z3BfzEA'
+
 #: The channel conversations, by channel name, oldest line first.
 CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
     "Public": (
@@ -226,6 +239,15 @@ CHANNEL_LINES: dict[str, tuple[Line, ...]] = {
         Line(at(1, "17:44"), ME, "Almost there, just around the corner"),
         Line(at(0, "08:15"), "Léa", "It's 2 degrees this morning, dress warm!"),
         Line(at(0, "08:18"), ME, "Too late, I'm already outside 🥶"),
+    ),
+    "#mcoimg": (
+        Line(at(2, "19:05"), "Noor", "Is this the channel for the pixel art?"),
+        Line(at(2, "19:09"), "Kim-NDG", "Yes! Images go here, so that Public stays readable"),
+        Line(at(0, "08:50"), ME, MAPLE_LEAF),
+        Line(at(0, "09:10"), "Marie-Ève", "Nice leaf 🍁"),
+        Line(at(0, "10:20"), "Noor", SMILEY),
+        Line(at(0, "11:05"), "Kim-NDG", "Pileated woodpecker on Mont-Royal this morning!"),
+        Line(at(0, "11:06"), "Kim-NDG", WOODPECKER),
     ),
 }
 
