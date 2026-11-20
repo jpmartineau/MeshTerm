@@ -40,6 +40,7 @@ from ..core.models import (
 )
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
+from . import pixelart
 from .compose import MentionEditor
 from .pathline import PATH_INK, PathHop
 from .qr import QrScreen, qr_strip
@@ -901,6 +902,10 @@ class ChatScreen(Screen):
         :func:`~meshterm.ui.tui.render.render_hanging`). This is because a terminal opens
         a link, and a user copies one, only while it is on one line.
 
+        A body that is a pixel image (MCOimg) shows a short line with its size, and the
+        image under it in half blocks, at the indent of the body (refer to
+        :mod:`~meshterm.ui.pixelart`).
+
         Where the platform draws them (:data:`_URL_CODES`, the PicoCalc), each URL in the
         body gets a QR code under it. The codes are side by side, at the indent of the
         body. Thus the user can open a link from the handheld on a phone, and does not
@@ -945,6 +950,12 @@ class ChatScreen(Screen):
             )
             indent = prefix.cell_len
             lines += render_hanging(Text(" " * indent), note, width, indent=indent)
+        if image is not None:
+            picture = pixelart.decoded(body)
+            if picture is not None:
+                indent = prefix.cell_len
+                art = pixelart.picture_text(picture, width - indent, indent=indent)
+                lines += render_lines(art, width, no_wrap=True)
         urls = links.urls(body) if _URL_CODES and image is None else []
         if urls:
             lines += render_lines(qr_strip(urls, width, indent=prefix.cell_len), width)

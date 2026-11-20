@@ -979,14 +979,16 @@ def test_chat_screen_shows_delivery_glyphs() -> None:
 
 
 def test_a_pixel_image_shows_a_short_line_not_its_text() -> None:
-    """A body that is an MCOimg image shows its size in place of its Base91 text."""
+    """A body that is an MCOimg image shows its size and the image, not its Base91 text."""
     text = "im3:g/5WjAL`NA"
     messages = [ChatMessage(text=text, peer="d4e5f6a7")]
     screen = _screen(_StubSession(), send=None, messages=messages)
     lines = [_strip_ansi(ln) for ln in screen._body_lines(text, messages[0], 60)]
-    assert len(lines) == 1
     assert lines[0].endswith("image · 4×2 · 4 colours")
-    assert "g/5W" not in lines[0]
+    assert not any("g/5W" in line for line in lines)
+    # Under the line, the 4 x 2 image is one row of four half blocks at the body indent.
+    assert len(lines) == 2
+    assert lines[1].strip() and set(lines[1].strip()) <= set("▀▄█")
 
 
 def test_wrapped_body_hangs_under_the_first_line() -> None:

@@ -1219,7 +1219,9 @@ def _names_us(last: ChatMessage, us: tuple[str | None, str | None]) -> bool:
     name = us[0]
     if not name:
         return False
-    body = split_channel_sender(last.text)[1] if last.is_channel and not last.outbound else last.text
+    body = (
+        split_channel_sender(last.text)[1] if last.is_channel and not last.outbound else last.text
+    )
     if mcoimg.recognize(body) is not None:
         return False  # the Base91 text of an image can hold an ``@[`` by chance
     return any(match.group(1) == name for match in MENTION.finditer(body))
