@@ -9,6 +9,39 @@ can change how things behave. It does not only add new things.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-20
+
+**MeshTerm shows the pixel images that other MeshCore apps send.** A channel message can
+carry a very small picture in the MCOimg format, as `im3:` and a line of characters. Before,
+MeshTerm showed those characters as noise. Now the chat draws the picture. Also, Chat no
+longer opens a Public channel that is not on your device.
+
+### Added
+
+- **The chat draws MCOimg pixel images.** A message that is an MCOimg image (version 3,
+  `im3:`) shows a line with its size and its number of colours, and the picture under it.
+  Each pixel is one cell wide, so the picture keeps its own size. A tall picture scrolls
+  with the transcript. The Messages list shows the same line in its preview. An image of
+  version 1 or 2 (`im:`) shows the line, but not the picture: MeshTerm does not decode
+  these older versions. Before, the characters of an image could also look like a mention
+  or a link. Now they do not.
+- **^U shows the picked image on the full screen.** The picture is as large as the screen
+  permits, by a whole number, so each pixel stays square. It never becomes smaller than its
+  own size. Under it are its size, its colours, and the text of the message itself. On the
+  PicoCalc and the Cardputer Zero, the F-key chip reads `Image`.
+- **The Show MCOimg preference turns the pictures in the chat off.** It is in the Display
+  group, and it is on by default. When it is off, the chat shows only the line about each
+  image, and ^U shows the picture.
+
+### Fixed
+
+- **Chat no longer opens a Public channel that is not on your device.** When slot 0 of the
+  device was empty, the Chat picker showed a Public row that looked like a real channel.
+  Each message that you sent there failed with "the device has no contact with that key".
+  Now the row offers to add Public to slot 0, and the chat opens after the device has the
+  channel. The command line lists only the channels on the device, and a refused send
+  names the empty slot.
+
 ## [0.12.0] - 2026-11-11
 
 **MeshTerm finds wrong clocks, names the place of each node, and lets you choose the route
@@ -880,7 +913,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.13.0
 [0.12.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.12.0
 [0.11.5]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.5
 [0.11.4]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.4
