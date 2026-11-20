@@ -162,39 +162,73 @@ class ImageScreen(ScrollScreen):
 
     It is the share screen of a link (:class:`~meshterm.ui.qr.QrScreen`) for an image: no
     header, no footer, no box, and no hint. Esc leaves, as it does everywhere. The image
-    fits itself to the frame at each paint, so a larger terminal shows a larger image. One
-    line under it gives its size and its colours, centred.
+    fits itself to the frame at each paint, so a larger terminal shows a larger image.
+    Under it are the caption (its size and its colours) and the text of the message itself,
+    the ``im3:`` string that the sender transmitted. Thus the user can examine or copy the
+    text that made the image.
 
     The image never touches the edges of the frame. It keeps :data:`_MARGIN_COLS` cells at
     each side and at least one row above and below, as a QR code keeps its quiet zone. The
     frame puts the block a little above the true centre, as it does for a code.
+
+    The text of the message has no spaces, so it breaks at the width of the image area,
+    into a block of lines that is centred as one. The text never makes the image smaller
+    than its own size. When the frame cannot hold both at that size, the image gets the
+    rows, and the text is under it, a page down, as the URL of a large QR code is.
     """
 
     bare = True
 
-    def __init__(self, picture: Picture, caption: Text) -> None:
-        """Set up the screen for ``picture``, with ``caption`` under it.
+    def __init__(self, picture: Picture, caption: Text, raw: str = "") -> None:
+        """Set up the screen for ``picture``, with ``caption`` and ``raw`` under it.
 
         Args:
             picture: The decoded image.
             caption: The line about the image, as the chat shows it.
+            raw: The text of the message: the ``im3:`` string.
         """
         super().__init__(Text(""), title="Image", floating=False)
         self.picture = picture
         self._caption = caption
+        self.raw = raw.strip()
 
     def render_body(self, width: int) -> list[str]:
-        """The image as large as ``width`` and the frame rows permit, then its caption."""
+        """The image as large as the frame permits, then its caption and its text."""
         # The frame notes its height before it asks for the body, as on the share screen.
         rows = self._scroll_viewport
         picture = self.picture
-        # The margins, then a blank row and the caption.
-        art_rows = max(1, rows - _MARGIN_ROWS - 2)
         art_cols = max(1, width - 2 * _MARGIN_COLS)
+        raw_lines = _raw_lines(self.raw, art_cols, width)
+        # The margins, a blank row and the caption, then a blank row and the text.
+        alone = max(1, rows - _MARGIN_ROWS - 2)
+        art_rows = max(1, alone - (1 + len(raw_lines) if raw_lines else 0))
+        size = (picture.width, picture.height)
+        if fit(*size, art_cols, art_rows, grow=True) < size <= fit(*size, art_cols, alone):
+            art_rows = alone  # the text goes a page down
         cols, _ = fit(picture.width, picture.height, art_cols, art_rows, grow=True)
         indent = max(0, (width - cols) // 2)
         art = picture_text(picture, art_cols, indent=indent, max_rows=art_rows, grow=True)
         caption = self._caption.copy()
         caption.justify = "center"
-        self.replace_content(Group(art, Text(""), caption))
+        parts = [art, Text(""), caption]
+        if raw_lines:
+            parts += [Text(""), *raw_lines]
+        self.replace_content(Group(*parts))
         return super().render_body(width)
+
+
+def _raw_lines(raw: str, max_cols: int, width: int) -> list[Text]:
+    """The text of a message as a block of lines no wider than ``max_cols``, centred in ``width``.
+
+    The text is Base91 characters only, each one cell wide, so a line is a slice of it.
+    Each line has the same indent, so that the block is centred and its last line starts
+    under the others.
+    """
+    if not raw:
+        return []
+    size = max(1, min(len(raw), max_cols))
+    indent = " " * max(0, (width - size) // 2)
+    return [
+        Text(indent + raw[start : start + size], style="muted", no_wrap=True)
+        for start in range(0, len(raw), size)
+    ]

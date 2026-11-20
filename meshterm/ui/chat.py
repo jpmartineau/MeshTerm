@@ -1366,9 +1366,10 @@ class ChatScreen(Screen):
     def _open_image(self) -> bool:
         """Show the pixel image of the selected message on a bare frame (^U).
 
-        The image is as large as the frame permits (refer to
-        :class:`~meshterm.ui.pixelart.ImageScreen`). When the ``show_mcoimg`` preference is
-        off, this is the way to see an image. When it is on, this is the large view.
+        The image is as large as the frame permits, with its caption and the text of the
+        message under it (refer to :class:`~meshterm.ui.pixelart.ImageScreen`). When the
+        ``show_mcoimg`` preference is off, this is the way to see an image. When it is on,
+        this is the large view.
 
         Returns:
             ``True`` when the selected message has an image, so that ^U does nothing more.
@@ -1379,13 +1380,14 @@ class ChatScreen(Screen):
         if self._codes_open:
             return True
         message = self._messages[max(0, min(self._selected or 0, len(self._messages) - 1))]
-        image = mcoimg.recognize(self._sender_and_body(message)[1])
+        body = self._sender_and_body(message)[1]
+        image = mcoimg.recognize(body)
         caption = pixel_image_text(image) if image is not None else Text("")
         self._codes_open = True
 
         async def run() -> None:
             try:
-                await self._session.run_screen(pixelart.ImageScreen(picture, caption))
+                await self._session.run_screen(pixelart.ImageScreen(picture, caption, body))
             finally:
                 self._codes_open = False
                 self._session.invalidate()

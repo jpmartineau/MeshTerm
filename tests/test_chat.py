@@ -991,6 +991,35 @@ def test_a_pixel_image_shows_a_short_line_not_its_text() -> None:
     assert lines[1].strip() and set(lines[1].strip()) <= set("▀▄█")
 
 
+def test_with_show_mcoimg_on_ctrl_u_still_opens_the_full_screen(monkeypatch) -> None:
+    """With the image in the transcript, ^U on the picked image opens the full screen too."""
+    from meshterm.core import preferences
+    from meshterm.ui.pixelart import ImageScreen
+
+    prefs = preferences.Preferences()
+    monkeypatch.setattr(preferences, "current", lambda: prefs)
+    text = "im3:g/5WjAL`NA"
+    session = _StubSession()
+    opened = []
+
+    async def run_screen(screen):  # noqa: ANN001, ANN202
+        opened.append(screen)
+
+    session.run_screen = run_screen
+    screen = _screen(session, send=None, messages=[ChatMessage(text=text, peer="d4e5f6a7")])
+    screen._render_grouped(60)
+    screen._selected = 0
+    assert "^U image" in screen.footer_hint
+
+    async def press() -> None:
+        screen.handle("url_code")
+        await asyncio.sleep(0)
+
+    asyncio.run(press())
+    assert len(opened) == 1 and isinstance(opened[0], ImageScreen)
+    assert opened[0].raw == text
+
+
 def test_with_show_mcoimg_off_the_image_is_behind_ctrl_u(monkeypatch) -> None:
     """With ``show_mcoimg`` off, only the line shows, and ^U on the picked image opens it."""
     from meshterm.core import preferences

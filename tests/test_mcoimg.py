@@ -343,3 +343,20 @@ def test_the_image_screen_centres_the_image_with_a_margin(text: str, cols: int, 
     left, right = len(art) - len(art.lstrip()), cols - len(art.rstrip())
     assert left >= 2 and right >= 2
     assert abs(left - right) <= 1
+
+
+def test_the_image_screen_shows_the_text_of_the_message_under_the_caption() -> None:
+    """Under the image and its caption, the full screen shows the ``im3:`` string itself."""
+    import re
+
+    from meshterm.ui.pixelart import ImageScreen
+    from meshterm.ui.tui.frame import compose_bare
+    from meshterm.ui.widgets import pixel_image_text
+
+    text = "im3:TAYL>iBNGbA"
+    screen = ImageScreen(decode(text), pixel_image_text(recognize(text)), text)
+    for _ in range(2):
+        frame = compose_bare(screen, 72, 24)
+    lines = [re.sub(r"\x1b\[[0-9;]*m", "", line).strip() for line in frame.split("\n")]
+    caption = next(i for i, line in enumerate(lines) if "image · 9×7 · 2 colours" in line)
+    assert text in lines[caption + 1 :]
