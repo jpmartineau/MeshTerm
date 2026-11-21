@@ -70,3 +70,10 @@ which are provided under the following license:
 
 MeshTerm's MCOimg decoder is its own code, written from the published format
 reference; only these colour values come from meshcore-open.
+
+Notification sounds: the files in meshterm/assets/sounds/android/ come from
+the Android Open Source Project (platform/frameworks/base, data/sounds),
+Copyright The Android Open Source Project, licensed under the Apache License,
+Version 2.0. MeshTerm changed them: each was decoded from Ogg Vorbis, mixed to
+one channel, and written as 16-bit WAV (scripts/sounds.py). The README.md
+beside them names each source file.

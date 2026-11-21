@@ -69,6 +69,9 @@ Built on **MeshCore** *https://meshcore.io/* — its firmware and companion
 library — with Rich, prompt_toolkit, Typer, bleak, pyserial, pycryptodome,
 markdown-it-py, tomli/tomli-w, and Segno, each under its own terms.
 
+The notification sounds come from the **Android Open Source Project**
+*https://source.android.com/*, under the same Apache License as MeshTerm.
+
 Map data **© OpenStreetMap contributors**, served as vector tiles by
 **OpenFreeMap** *https://openfreemap.org/* on the **© OpenMapTiles** schema
 *https://openmaptiles.org/*, used under the **ODbL**
