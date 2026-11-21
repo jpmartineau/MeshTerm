@@ -50,12 +50,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..platforms import ALL_PLATFORMS
 from .advert_store import DEFAULT_QUIET_S, QUIET_CHOICES_S
 from .atomicwrite import write_atomically
 from .courier_store import DONE_CAP
 from .geo import DEFAULT_VIEW_FRACTION
 from .models import CLOCK_TOLERANCE_S, NAME_OVERLAP_DAYS
-from ..platforms import ALL_PLATFORMS
 from .watch_store import ALERT_CAP, DEFAULT_SILENCE_HOURS, OFF, SILENCE_CHOICES_H
 
 if sys.version_info >= (3, 11):
@@ -172,7 +172,7 @@ _SOUND_THEME_CHOICES: dict[str, str] = {
 }
 
 #: When the title bar flashes for a notification. ``silent`` flashes only when no sound
-#: plays for it: sounds are off, the theme is ``none``, the platform has no sound, or the
+#: plays for it: the sounds are muted, the theme is ``none``, the platform has no sound, or the
 #: player failed.
 _FLASH_CHOICES: dict[str, str] = {"off": "off", "on": "on", "silent": "when silent"}
 
@@ -503,40 +503,40 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     ),
     # --- Sound ---------------------------------------------------------------------
     PrefSpec(
-        key="sounds",
-        label="Sounds",
-        help="Play a sound for notifications. ^S turns it on or off",
-        group="Sound",
-        value_type="bool",
-        # Off: a new user hears nothing until they ask for it (the request on Discord,
-        # 2026-09-26: "Defaulted to off though"). ^S changes this preference from any
-        # screen, and the header shows its state (🔊 on, 🔇 off).
-        default=False,
-        platforms=_SOUND_PLATFORMS,
-    ),
-    PrefSpec(
         key="sound_theme",
         label="Sound theme",
         help="The set of sounds that notifications play",
         group="Sound",
         value_type="enum",
+        # Android, and not muted (JP, 2026-11-20). "No sound" is a theme, not a mute: the
+        # user who wants no sound at all selects it.
         default="android",
         choices=_SOUND_THEME_CHOICES,
         platforms=_SOUND_PLATFORMS,
     ),
     PrefSpec(
-        key="sound_volume_pct",
+        key="sound_muted",
+        label="Mute",
+        help="Mute the sounds for now. ^S mutes or unmutes on any screen",
+        group="Sound",
+        value_type="bool",
+        # A mute is for now, and the theme is for always. ^S changes this preference from
+        # any screen, and the header shows its state (🔊 on, 🔇 muted).
+        default=False,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="sound_volume",
         label="Volume",
-        help="How loud the sounds play, before the volume of the system",
+        help="How loud the sounds play: 1 is 10%, 10 is 100%",
         group="Sound",
         value_type="int",
-        # MeshTerm scales the samples itself (JP, 2026-11-20), because winsound, the only
-        # player on Windows, has no volume control. Thus the volume is the same with each
-        # player. 70: the AOSP chimes are loud at full scale.
-        default=70,
-        minimum=5,
-        maximum=100,
-        unit="%",
+        # A slider of ten steps (JP, 2026-11-20). MeshTerm scales the samples itself,
+        # because winsound, the only player on Windows, has no volume control. Thus the
+        # volume is the same with each player.
+        default=7,
+        minimum=1,
+        maximum=10,
         platforms=_SOUND_PLATFORMS,
     ),
     PrefSpec(
@@ -827,6 +827,11 @@ RETIRED: frozenset[str] = frozenset(
         # and later the weekly flood advert (``weekly_flood_advert``) replaced them.
         "advert_direct_hours",
         "advert_flood_hours",
+        # The first form of the sound preferences, replaced on the day they were made
+        # (2026-11-20): a sound on/off switch that the mute and the "no sound" theme
+        # replaced, and a volume in percent that a slider of ten steps replaced.
+        "sounds",
+        "sound_volume_pct",
     }
 )
 

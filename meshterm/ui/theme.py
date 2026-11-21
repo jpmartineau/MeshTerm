@@ -851,6 +851,8 @@ _GLYPH_MAP: dict[str, str] = {
     "📨": "=",   # courier/queue: stacked letters
     "🔔": "•",   # notify: the badge dot
     "🔕": "·",   # mute: the hollowed-out dot
+    "🔊": "◄",   # sounds on: the cone of a speaker
+    "🔇": "⌫",   # sounds off: the speaker with a cross in it
     "📱": "▓",   # QR: a dense block
     "🎨": "░",   # pixel image (MCOimg): a fine grid of dots
     "🔗": "&",   # link: the joining glyph

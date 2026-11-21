@@ -124,6 +124,10 @@ _CTRL_LETTER_CHORDS: dict[str, str] = {
     "p": "paths",
     "q": "quit",
     "r": "retry",
+    # ^S mutes or unmutes the sounds from any screen (JP, 2026-11-20). S for sound and
+    # silence. It is the XOFF key, but the raw mode clears IXON/IXOFF (refer to the text
+    # above), so the terminal never takes it to freeze the screen.
+    "s": "sound",
     "u": "url_code",
     "v": "paste_clipboard",
     "w": "to_menu",
@@ -631,6 +635,8 @@ class TuiSession:
         # (refer to :meth:`set_quiesce`). Then the quiesce while it is held. Then the
         # one-way flag that :meth:`leave` raises, which tells if the app is on its way out.
         self._quiesce: Callable[[], AbstractAsyncContextManager[Any]] | None = None
+        # What ^S does: the app mutes or unmutes its sounds (refer to set_sound_toggle).
+        self._sound_toggle: Callable[[], None] | None = None
         self._quiet: Quiet | None = None
         self._leaving = False
         # The Esc of a terminal, held back while the keyboard says that the key is still
@@ -811,6 +817,24 @@ class TuiSession:
             enter: Makes the async context manager to hold, or ``None`` for nothing.
         """
         self._quiesce = enter
+
+    def set_sound_toggle(self, toggle: Callable[[], None] | None) -> None:
+        """Declare what ^S does: mute or unmute the sounds of the app, from any screen.
+
+        Args:
+            toggle: Mutes or unmutes the sounds, or ``None`` for nothing.
+        """
+        self._sound_toggle = toggle
+
+    def bell(self) -> None:
+        """Ring the terminal bell (BEL), for the ``bell`` sound theme.
+
+        Over SSH, the bell rings on the computer of the user, because the terminal there
+        gets the byte.
+        """
+        output = getattr(self._app, "output", None)
+        if output is not None:
+            output.bell()
 
     def set_esc_probe(self, down: Callable[[], bool] | None) -> None:
         """Declare how to ask whether the Esc key is physically down, for the Esc of a terminal.
@@ -2410,6 +2434,13 @@ class TuiSession:
             # screen that offers it. It is never a chord that a wrong key press on the way to
             # ^W can hit.
             self._exit_app()
+            return
+        if action == "sound":
+            # Mute or unmute the sounds, from any screen (^S). The app declares what the key
+            # does, because only the app has the sound service (refer to set_sound_toggle).
+            if self._sound_toggle is not None:
+                self._sound_toggle()
+            self.invalidate()
             return
         if action == "paste_clipboard":
             # Some terminals send Ctrl-V as the literal control key, with no bracketed-paste

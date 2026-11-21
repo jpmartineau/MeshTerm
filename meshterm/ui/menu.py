@@ -40,7 +40,7 @@ from .menus import (
     section_heading,
 )
 from .surface import TuiUi
-from .theme import make_console
+from .theme import glyph, make_console
 from .tui import (
     Choice,
     PopToMenu,
@@ -377,7 +377,23 @@ def _header_segments(ctx: AppContext, cache: dict) -> list[Text]:
             badge.append("▲", style="err")
             badge.append(f" {alerts}", style="warn")
             segments.append(badge)
+        speaker = _sound_badge(ctx)
+        if speaker:
+            segments.append(speaker)
     return segments
+
+
+def _sound_badge(ctx: AppContext) -> Text:
+    """The state of the sounds in the header: 🔊 on, 🔇 off, or nothing.
+
+    The header shows nothing where no sound can play: on a platform with no sound (the
+    PicoCalc), and with the ``none`` theme (JP, 2026-11-20: "No sound, no speaker emoji at
+    all"). ^S changes the state from any screen.
+    """
+    sound = getattr(ctx, "sound", None)
+    if sound is None or not sound.available or not sound.audible_theme:
+        return Text()
+    return Text(glyph(_SOUND_ON_ICON if sound.enabled else _SOUND_OFF_ICON), style="muted")
 
 
 def _demo_name() -> str:
@@ -467,6 +483,9 @@ async def run_menu(ctx: AppContext) -> None:
     session.set_quit_confirm(lambda: _confirm_quit(ctx, session))
     # What a held Esc engages while its dialog is open. The app keeps it while it exits.
     session.set_quiesce(lambda: _off_the_air(ctx))
+    # ^S mutes or unmutes the sounds from any screen. The bell theme rings the terminal.
+    session.set_sound_toggle(lambda: _toggle_sound(ctx))
+    ctx.sound.set_hooks(bell=session.bell)
     # Where a terminal gives the keys, MeshTerm asks the keyboard whether Esc is still
     # held. Thus a held Esc quits there too. The emulator reads its keys itself, and the
     # keyboard of its machine is not the keyboard of the handheld.
@@ -588,6 +607,27 @@ _QUIT_ICON = "🚪"
 #: :func:`_menu_round`). Esc at the menu does not open it: Esc does nothing there (refer to
 #: :class:`_MainMenu`).
 _QUIT_VALUE = "__quit__"
+
+#: The icons of the sound state: in the header, and on the Sounds row of the menu.
+_SOUND_ON_ICON = "🔊"
+_SOUND_OFF_ICON = "🔇"
+
+#: The value with which the Sounds row resolves. The row mutes or unmutes the sounds, and
+#: the menu stays (refer to :func:`_menu_round`).
+_SOUND_VALUE = "__sound__"
+
+
+def _toggle_sound(ctx: AppContext) -> None:
+    """Mute or unmute the sounds (the Sounds row, and ^S from any screen).
+
+    When the sounds come on, the channel message sound plays one time. Thus the user hears
+    that they are on, and how loud they are.
+    """
+    sound = ctx.sound
+    if not sound.available or not sound.audible_theme:
+        return
+    if sound.toggle():
+        sound.preview()
 
 
 async def _confirm_quit(ctx: AppContext, session: TuiSession) -> bool:
@@ -725,7 +765,9 @@ def _menu_lane(tools: Sequence[Any]) -> int:
         The column width from :func:`~meshterm.ui.menus.icon_lane`: ``0`` where the
         platform draws no icon lane.
     """
-    return icon_lane([*(tool.icon for tool in tools), _QUIT_ICON])
+    return icon_lane(
+        [*(tool.icon for tool in tools), _QUIT_ICON, _SOUND_ON_ICON, _SOUND_OFF_ICON]
+    )
 
 
 def _menu_labels(tools: Sequence[Any], *, lane: int | None = None) -> list[Text]:
@@ -760,7 +802,7 @@ def _menu_labels(tools: Sequence[Any], *, lane: int | None = None) -> list[Text]
     return labels
 
 
-def _menu_items(tools: Sequence[Any]) -> list:
+def _menu_items(tools: Sequence[Any], sound: Any = None) -> list:
     """The rows of the main menu: the tools under their section headings, then Quit.
 
     This function is separate from :func:`_menu_loop`, so that the list can be built and
@@ -779,6 +821,8 @@ def _menu_items(tools: Sequence[Any]) -> list:
         tools: The visible tools of the menu, in the order in which they are drawn
             (already sorted by category, so that each heading opens its section only one
             time).
+        sound: The sound service (:class:`~meshterm.services.sound.SoundService`), for the
+            Sounds row above Quit. ``None``, or a platform with no sound, has no such row.
 
     Returns:
         The :class:`~meshterm.ui.tui.Choice` and :class:`~meshterm.ui.tui.Separator`
@@ -800,6 +844,26 @@ def _menu_items(tools: Sequence[Any]) -> list:
         # stays (Choice.hscroll_from).
         items.append(Choice(title=row, value=tool.name, hscroll_from=name_w + 2))
     items.append(Separator(" "))
+    if sound is not None and sound.available:
+        # The row names the state that the sounds are in now, and Enter changes it. The
+        # title is read at each paint, so ^S on another screen shows here too.
+        # With the "no sound" theme, the row has no speaker (JP, 2026-11-20: "No sound, no
+        # speaker emoji at all") and Enter does nothing: there is nothing to mute.
+        def sounds_title() -> Text:
+            if not sound.audible_theme:
+                label = Text(" " * (lane + 1) if lane else "")  # an empty icon column
+                label.append("No sound")
+                hint = "the sound theme is in Preferences"
+            else:
+                on = sound.enabled
+                label = icon_mark(_SOUND_ON_ICON if on else _SOUND_OFF_ICON, "", lane)
+                label.append("Sound on" if on else "Sound muted")
+                hint = "^S on any screen"
+            label.append(" " * max(2, name_w - label.cell_len + 2))
+            label.append(hint, style="muted")
+            return label
+
+        items.append(Choice(title=sounds_title, value=_SOUND_VALUE))
     # Quit has no description, so it is not part of name_w. Only its icon uses the icon
     # column of the tools.
     quit_label = icon_mark(_QUIT_ICON, "", lane)
@@ -833,7 +897,7 @@ async def _menu_loop(ctx: AppContext, session: TuiSession) -> None:
         session: The running TUI session.
     """
     tools = [tool for tool in all_tools() if tool.menu_visible]
-    items = _menu_items(tools)
+    items = _menu_items(tools, ctx.sound)
 
     # Drive the menu list here (instead of through session.select), so that it stays on
     # the stack while the quit dialog shows over it. The confirm is drawn as a centred box
@@ -930,6 +994,9 @@ async def _menu_round(
         if selection == _QUIT_VALUE:
             if await session.confirm_quit():
                 raise _Quit()
+            return
+        if selection == _SOUND_VALUE:
+            _toggle_sound(ctx)
             return
         # A ``popup`` tool runs while the menu is still pushed. Thus its prompts and its
         # result show over the menu as modal dialogs, and do not replace the screen.

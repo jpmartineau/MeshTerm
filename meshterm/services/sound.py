@@ -258,8 +258,8 @@ class SoundService:
 
     @property
     def enabled(self) -> bool:
-        """Whether sounds are on: the platform can play them, and the user turned them on."""
-        return self.available and bool(self._prefs.sounds)
+        """Whether sounds can play now: the platform can play them, and they are not muted."""
+        return self.available and not bool(self._prefs.sound_muted)
 
     @property
     def audible_theme(self) -> bool:
@@ -267,18 +267,18 @@ class SoundService:
         return self._prefs.sound_theme != "none"
 
     def toggle(self) -> bool:
-        """Turn sounds on or off (the ^S key), and save the preference.
+        """Mute or unmute the sounds (the ^S key), and save the preference.
 
         Returns:
-            ``True`` if sounds are now on.
+            ``True`` if the sounds are now on (not muted).
         """
-        now_on = not bool(self._prefs.sounds)
-        self._prefs.set("sounds", now_on)
+        muted = not bool(self._prefs.sound_muted)
+        self._prefs.set("sound_muted", muted)
         try:
             self._prefs.save()
         except OSError as error:
             log.warning("sound: could not save the preferences: %s", error)
-        return now_on
+        return not muted
 
     def notify(self, event: SoundEvent) -> bool:
         """Play the sound of an event, and flash the title bar if the preference says so.
@@ -304,7 +304,7 @@ class SoundService:
         return audible
 
     def preview(self, event: SoundEvent = SoundEvent.CHANNEL_MESSAGE) -> bool:
-        """Play the sound of an event at the current volume, also when sounds are off.
+        """Play the sound of an event at the current volume, also when the sounds are muted.
 
         The Preferences page calls it while the user changes the volume or the theme
         (JP, 2026-11-20: "while adjusting the volume, play the channel message sound").
@@ -329,7 +329,7 @@ class SoundService:
         try:
             path = scaled(
                 SOUNDS_DIR / files[event],
-                int(self._prefs.sound_volume_pct),
+                int(self._prefs.sound_volume) * 10,
                 self._ctx.settings.config_dir / "sound-cache",
             )
         except (OSError, wave.Error, EOFError) as error:

@@ -71,9 +71,17 @@ def test_each_theme_file_exists_and_is_16_bit_pcm() -> None:
                 assert reader.getsampwidth() == 2
 
 
-def test_sounds_are_off_by_default(tmp_path: Path) -> None:
-    """A new user hears nothing, and the default flash replaces the sound."""
+def test_sounds_play_by_default(tmp_path: Path) -> None:
+    """The default is the Android theme, not muted (JP, 2026-11-20)."""
     service, player, _, flashes, _ = _service(tmp_path)
+    assert service.notify(SoundEvent.DIRECT_MESSAGE) is True
+    assert len(player.played) == 1
+    assert flashes == []
+
+
+def test_a_muted_service_is_silent_and_flashes(tmp_path: Path) -> None:
+    """A mute plays nothing, and the default flash replaces the sound."""
+    service, player, _, flashes, _ = _service(tmp_path, sound_muted=True)
     assert service.notify(SoundEvent.DIRECT_MESSAGE) is False
     assert player.played == []
     assert flashes == [1]
@@ -81,7 +89,9 @@ def test_sounds_are_off_by_default(tmp_path: Path) -> None:
 
 def test_an_event_plays_its_file_of_the_theme(tmp_path: Path) -> None:
     """An event plays its own file of the theme, and the flash stays off."""
-    service, player, _, flashes, _ = _service(tmp_path, sounds=True)
+    service, player, _, flashes, _ = _service(
+        tmp_path,
+    )
     assert service.notify(SoundEvent.MENTION) is True
     assert player.played[0].name.startswith("android-Ariel-")
     assert flashes == []  # when silent: a sound played, so no flash
@@ -89,7 +99,7 @@ def test_an_event_plays_its_file_of_the_theme(tmp_path: Path) -> None:
 
 def test_the_volume_scales_a_cached_copy(tmp_path: Path) -> None:
     """A volume below 100 plays a scaled copy from the cache: 50% is a quarter."""
-    service, player, _, _, _ = _service(tmp_path, sounds=True, sound_volume_pct=50)
+    service, player, _, _, _ = _service(tmp_path, sound_volume=5)
     service.notify(SoundEvent.DIRECT_MESSAGE)
     copy = player.played[0]
     assert copy.parent == tmp_path / "sound-cache"
@@ -108,7 +118,7 @@ def test_the_volume_scales_a_cached_copy(tmp_path: Path) -> None:
 
 def test_full_volume_plays_the_file_of_the_package(tmp_path: Path) -> None:
     """At 100%, the service plays the file of the package, with no copy."""
-    service, player, _, _, _ = _service(tmp_path, sounds=True, sound_volume_pct=100)
+    service, player, _, _, _ = _service(tmp_path, sound_volume=10)
     service.notify(SoundEvent.ROOM_POST)
     assert player.played == [SOUNDS_DIR / "android/Ceres.wav"]
 
@@ -122,7 +132,7 @@ def test_the_gain_follows_the_square_of_the_volume() -> None:
 
 def test_the_bell_theme_rings_the_bell(tmp_path: Path) -> None:
     """The bell theme rings the terminal bell and plays no file."""
-    service, player, _, _, bells = _service(tmp_path, sounds=True, sound_theme="bell")
+    service, player, _, _, bells = _service(tmp_path, sound_theme="bell")
     assert service.notify(SoundEvent.CHANNEL_MESSAGE) is True
     assert bells == [1]
     assert player.played == []
@@ -130,7 +140,7 @@ def test_the_bell_theme_rings_the_bell(tmp_path: Path) -> None:
 
 def test_the_none_theme_is_silent_and_flashes(tmp_path: Path) -> None:
     """The none theme plays nothing, so the default flash shows the event."""
-    service, player, _, flashes, _ = _service(tmp_path, sounds=True, sound_theme="none")
+    service, player, _, flashes, _ = _service(tmp_path, sound_theme="none")
     assert service.notify(SoundEvent.DIRECT_MESSAGE) is False
     assert player.played == []
     assert flashes == [1]
@@ -138,7 +148,9 @@ def test_the_none_theme_is_silent_and_flashes(tmp_path: Path) -> None:
 
 def test_the_tick_is_off_by_default(tmp_path: Path) -> None:
     """The packet tick is off until the user turns it on."""
-    service, player, _, flashes, _ = _service(tmp_path, sounds=True)
+    service, player, _, flashes, _ = _service(
+        tmp_path,
+    )
     assert service.notify(SoundEvent.PACKET_TICK) is False
     assert player.played == []
     assert flashes == []  # a tick never flashes
@@ -146,7 +158,7 @@ def test_the_tick_is_off_by_default(tmp_path: Path) -> None:
 
 def test_the_tick_plays_at_most_one_each_quarter_second(tmp_path: Path) -> None:
     """The tick plays at most one time each 250 ms."""
-    service, player, clock, _, _ = _service(tmp_path, sounds=True, packet_tick=True)
+    service, player, clock, _, _ = _service(tmp_path, packet_tick=True)
     assert service.notify(SoundEvent.PACKET_TICK) is True
     clock.now += 0.1
     assert service.notify(SoundEvent.PACKET_TICK) is False
@@ -157,7 +169,7 @@ def test_the_tick_plays_at_most_one_each_quarter_second(tmp_path: Path) -> None:
 
 def test_no_tick_right_after_another_sound(tmp_path: Path) -> None:
     """A tick does not play over the start of another sound."""
-    service, player, clock, _, _ = _service(tmp_path, sounds=True, packet_tick=True)
+    service, player, clock, _, _ = _service(tmp_path, packet_tick=True)
     service.notify(SoundEvent.DIRECT_MESSAGE)
     clock.now += 0.1
     assert service.notify(SoundEvent.PACKET_TICK) is False
@@ -166,25 +178,28 @@ def test_no_tick_right_after_another_sound(tmp_path: Path) -> None:
 
 def test_a_failed_player_counts_as_silent(tmp_path: Path) -> None:
     """A player that fails counts as silent, so the flash shows the event."""
-    service, _, _, flashes, _ = _service(tmp_path, works=False, sounds=True)
+    service, _, _, flashes, _ = _service(
+        tmp_path,
+        works=False,
+    )
     assert service.notify(SoundEvent.DIRECT_MESSAGE) is False
     assert flashes == [1]
 
 
 @pytest.mark.parametrize(
-    ("mode", "sounds", "flashes"),
+    ("mode", "muted", "flashes"),
     [
-        ("off", False, 0),
         ("off", True, 0),
-        ("on", False, 1),
+        ("off", False, 0),
         ("on", True, 1),
-        ("silent", False, 1),
-        ("silent", True, 0),
+        ("on", False, 1),
+        ("silent", True, 1),
+        ("silent", False, 0),
     ],
 )
-def test_the_flash_modes(tmp_path: Path, mode: str, sounds: bool, flashes: int) -> None:
+def test_the_flash_modes(tmp_path: Path, mode: str, muted: bool, flashes: int) -> None:
     """The flash follows its preference: off, on, or only when no sound plays."""
-    service, _, _, flashed, _ = _service(tmp_path, sounds=sounds, notify_flash=mode)
+    service, _, _, flashed, _ = _service(tmp_path, sound_muted=muted, notify_flash=mode)
     service.notify(SoundEvent.DIRECT_MESSAGE)
     assert len(flashed) == flashes
 
@@ -192,16 +207,18 @@ def test_the_flash_modes(tmp_path: Path, mode: str, sounds: bool, flashes: int) 
 def test_the_picocalc_is_silent_and_flashes(tmp_path: Path) -> None:
     """The PicoCalc plays no sound, also for a preview, and it flashes."""
     set_platform(PICOCALC_LYRA)
-    service, player, _, flashes, _ = _service(tmp_path, sounds=True)
+    service, player, _, flashes, _ = _service(
+        tmp_path,
+    )
     assert service.notify(SoundEvent.DIRECT_MESSAGE) is False
     assert service.preview() is False
     assert player.played == []
     assert flashes == [1]
 
 
-def test_the_preview_plays_also_when_sounds_are_off(tmp_path: Path) -> None:
-    """The preview plays the channel message sound also when sounds are off."""
-    service, player, _, flashes, _ = _service(tmp_path)
+def test_the_preview_plays_also_when_muted(tmp_path: Path) -> None:
+    """The preview plays the channel message sound also when the sounds are muted."""
+    service, player, _, flashes, _ = _service(tmp_path, sound_muted=True)
     assert service.preview() is True
     assert player.played[0].name.startswith("android-InCallNotification-")
     assert flashes == []
@@ -212,7 +229,7 @@ def test_toggle_changes_and_saves_the_preference(tmp_path: Path) -> None:
     prefs = Preferences(path=tmp_path / "preferences.toml")
     ctx = SimpleNamespace(preferences=prefs, settings=SimpleNamespace(config_dir=tmp_path))
     service = SoundService(ctx, player=FakePlayer())  # type: ignore[arg-type]
-    assert service.toggle() is True
-    assert Preferences.load(tmp_path / "preferences.toml").sounds is True
-    assert service.toggle() is False
-    assert Preferences.load(tmp_path / "preferences.toml").sounds is False
+    assert service.toggle() is False  # muted
+    assert Preferences.load(tmp_path / "preferences.toml").sound_muted is True
+    assert service.toggle() is True  # on again
+    assert Preferences.load(tmp_path / "preferences.toml").sound_muted is False
