@@ -1145,6 +1145,27 @@ $ meshterm --absolute chat history --to Alice
 takes the rest of the line. A message body is the one field that can hold any text, so no
 column can follow it.
 
+**Relays.** A channel has no acknowledgement. But your radio hears the repeaters that relay
+your message, and each copy names the relays that it went through. The `history` of a
+channel has a `HEARD` column for each of your own messages:
+
+```console
+$ meshterm chat history --channel 0
+TIME  DIR  PEER    SNR_DB  HEARD  TEXT
+ 12m  in   Public    +6.5  -      Alice: anyone on the ridge?
+ 10m  out  Public       -  3      heading up now
+  4m  out  Public       -  near   at the top
+ now  out  Public       -  wait   coming down
+```
+
+A number is the count of relays past your **near relays**: the first hop of each outbound
+path of the active site, or of the fixed device (refer to `meshterm outbound`). These
+relays heard your message, so it went farther than the repeaters next to you. `near`
+means that only your near relays sent it back. `none` means that no relay sent it back.
+`wait` means that the message is still in its wait (the `heard_wait_s` preference). With
+no outbound paths, each relay counts. MeshTerm sees only the relays that your radio hears,
+and only while it is connected. A received message has no value (`-`).
+
 **Rooms.** A room server is a message board that lives on a radio. First, join the room
 with [`meshterm rooms join`](#meshterm-rooms). After that, post with `send --to`, in the
 same way as a direct message. `acked yes` means that the room stored the post. It does
@@ -1222,7 +1243,10 @@ $ meshterm chat send "all clear" --channel 0 --scope '*' --json
 the purpose of the one absence token. It is also the reason why the plain face prints
 nothing there: it has no way to say it.
 
-`history` is an array, with the oldest message first:
+`history` is an array, with the oldest message first. Each record also has `heard`
+(`"waiting"`, `"beyond"`, `"nearby"`, `"unheard"`, or `null` when the message is not
+your own channel message), `heard_by` (the hashes of the relays past your near relays),
+and `heard_via` (the near relays that carried the message out):
 
 ```json
 {"created_at":"2026-09-08T08:27:37Z","direction":"out","node":{"name":"Alice","key":null,"hash":"d4e5f6a7","type":null,"self":false},"channel":null,"author":null,"snr_db":null,"text":"on my way","acked":true}
@@ -2002,6 +2026,7 @@ flood_advert_cooldown_s      60                                    60           
 weekly_flood_advert          off                                   off                                   Flood an advert after a week without one
 advert_quiet_s               30                                    30                                    Silence to wait for before the weekly advert
 direct_message_soft_retries  0                                     0                                     Times to resend a message that gets no reply
+heard_wait_s                 30                                    30                                    Wait this long for a relay of a channel message
 room_relogin_minutes         30                                    30                                    Opening a room this quiet logs in again
 tx_opt_min                   18                                    18                                    Weakest power it will try
 tx_opt_max                   28                                    28                                    Strongest power it will try

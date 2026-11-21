@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from ..core.channel_probe import ChannelSlot
+    from ..services.heard_by import HeardBy
     from ..ui.report import Facts, Listing
 
 #: The number of recent messages that ``chat history`` prints by default.
@@ -419,12 +420,14 @@ class ChatTool(Tool):
         room = False
         name_of: NodeResolver | None = None
         me: NodeRef | None = None
+        heard: Callable[[ChatMessage], HeardBy | None] | None = None
         if channel is not None:
             channel_id = await ctx.chat.channel_id_for(int(channel))
             messages = ctx.repo.recent_chat_messages(
                 is_channel=True, channel_id=channel_id, limit=limit
             )
             label = f"#{channel}"
+            heard = await _channel_verdicts(ctx, int(channel), messages)
         else:
             device = await ctx.device()
             contacts = await device.get_contacts()
@@ -443,7 +446,7 @@ class ChatTool(Tool):
 
         return ToolResult(
             summary={"conversation": label, "messages": len(messages)},
-            report=(_transcript(messages, room=room, name_of=name_of, me=me),),
+            report=(_transcript(messages, room=room, name_of=name_of, me=me, heard=heard),),
             exit_code=exitcodes.OK if messages else exitcodes.NO_RESULT,
         )
 
@@ -1255,7 +1258,7 @@ def _channel_ref(idx: int | None, label: str, secret: bytes | None) -> ChannelRe
     )
 
 
-def _message_columns(*, author_lane: bool = False) -> tuple:
+def _message_columns(*, author_lane: bool = False, heard_lane: bool = False) -> tuple:
     """The columns of one transcript row, shared by ``history`` and the ``listen`` stream.
 
     ``DIR`` holds what the transcript of the menu writes into its sender lane as the word
@@ -1282,7 +1285,7 @@ def _message_columns(*, author_lane: bool = False) -> tuple:
     """
     from dataclasses import replace
 
-    from ..ui import fields
+    from ..ui import fields, report
 
     peer = fields.plain_only(fields.name("conversation", "PEER"))
     when = fields.plain_only(fields.when("shown_at", "TIME"))
@@ -1308,8 +1311,20 @@ def _message_columns(*, author_lane: bool = False) -> tuple:
         fields.channel("channel", lanes=()),
         _author_column(lane=author_lane),
         fields.snr("snr_db", "SNR_DB"),
+        *(
+            (
+                fields.plain_only(
+                    report.Column(key="heard_cell", lanes=(report.Lane(header="HEARD"),))
+                ),
+            )
+            if heard_lane
+            else ()
+        ),
         fields.free("text", "TEXT"),
         fields.hidden("acked"),
+        fields.hidden("heard"),
+        fields.hidden("heard_by"),
+        fields.hidden("heard_via"),
     )
 
 
@@ -1355,12 +1370,38 @@ def _author_ref(author: str, name_of: NodeResolver | None) -> NodeRef:
     return NodeRef(name=label if key else None, hash=author)
 
 
+async def _channel_verdicts(
+    ctx: AppContext, channel: int, messages: list[ChatMessage]
+) -> Callable[[ChatMessage], HeardBy | None] | None:
+    """The verdicts on our messages in a channel: did a relay past the near relays hear them?
+
+    Refer to :mod:`~meshterm.services.heard_by`. With no key for the slot, there is no
+    verdict, and the column is absent on each row.
+    """
+    from ..services.heard_by import make_tracker
+
+    try:
+        device = await ctx.device()
+        payload = await device.get_channel(channel)
+        raw = (payload or {}).get("channel_secret")
+        secret = bytes(raw) if raw else None
+        name = str((payload or {}).get("channel_name") or f"#{channel}")
+    except Exception:  # noqa: BLE001 - no key, no verdict. The history still prints
+        return None
+    tracker = await make_tracker(ctx, channel_name=name, secret=secret)
+    if tracker is None:
+        return None
+    await tracker.fill(messages)
+    return tracker.verdict
+
+
 def _transcript(
     messages: list[ChatMessage],
     *,
     room: bool = False,
     name_of: NodeResolver | None = None,
     me: NodeRef | None = None,
+    heard: Callable[[ChatMessage], HeardBy | None] | None = None,
 ) -> Listing:
     """The stored messages of a conversation, oldest first, one record for each.
 
@@ -1371,6 +1412,9 @@ def _transcript(
             each row).
         name_of: Names the key of an author, for a room.
         me: Our node, the author of our own posts in a room.
+        heard: Gives the verdict on each of our channel messages (refer to
+            :mod:`~meshterm.services.heard_by`). With it, the plain face has a ``HEARD``
+            lane. The document always has ``heard``, ``heard_by``, and ``heard_via``.
     """
     from ..ui.report import Listing
 
@@ -1383,6 +1427,7 @@ def _transcript(
             else None
         )
         corrected = message.corrected(tolerance)
+        verdict = heard(message) if heard is not None else None
         rows.append(
             {
                 "created_at": message.created_at,
@@ -1403,14 +1448,36 @@ def _transcript(
                 "snr_db": message.snr,
                 "text": message.text,
                 "acked": message.acked,
+                "heard": verdict.state if verdict is not None else None,
+                "heard_by": list(verdict.beyond) if verdict is not None else None,
+                "heard_via": list(verdict.via) if verdict is not None else None,
+                "heard_cell": _heard_cell(verdict),
             }
         )
+    lanes = ("TIME", "DIR", "AUTHOR" if room else "PEER", "SNR_DB")
     return Listing(
         key="messages",
-        columns=_message_columns(author_lane=room),
+        columns=_message_columns(author_lane=room, heard_lane=heard is not None),
         rows=rows,
-        order=("TIME", "DIR", "AUTHOR" if room else "PEER", "SNR_DB", "TEXT"),
+        order=(*lanes, "HEARD", "TEXT") if heard is not None else (*lanes, "TEXT"),
     )
+
+
+def _heard_cell(verdict: HeardBy | None) -> str:
+    """The plain ``HEARD`` cell: the number of relays past the near relays, or a word.
+
+    ``near`` is a message that only the near relays sent back, ``none`` is one that no
+    relay sent back, and ``wait`` is one that is still in its wait. A message that is not
+    ours has no verdict (``-``).
+    """
+    from ..services.heard_by import BEYOND, NEARBY, UNHEARD, WAITING
+    from ..ui import script
+
+    if verdict is None:
+        return script.NONE
+    if verdict.state == BEYOND:
+        return str(len(verdict.beyond))
+    return {NEARBY: "near", UNHEARD: "none", WAITING: "wait"}.get(verdict.state, script.NONE)
 
 
 def _live_messages() -> Listing:

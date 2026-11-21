@@ -15,7 +15,9 @@ message reached our node:
   recover the plaintext. A packet whose text is equal to the text of the message is one
   arrival of that message. The comparison accepts the ``Name: `` sender prefix on either
   side. Our own broadcasts are included, because the device overhears the relay of our
-  broadcast by a repeater and logs it like all other packets.
+  broadcast by a repeater and logs it like all other packets. For our own broadcast, the
+  sender time in the packet must also be near the stored time of the send. Thus two
+  messages with the same text a few minutes apart do not share their copies.
 * **Direct messages** go in ECDH-encrypted ``TEXT_MSG`` packets that only the recipient
   can decrypt. Thus a match by content is not possible from the log. But such a packet
   carries its **addressing and its MAC** in clear text (:mod:`~meshterm.core.frames`): the
@@ -55,7 +57,14 @@ if TYPE_CHECKING:
 #: The span of the log that MeshTerm searches around a channel message. It is wide,
 #: because an inbound message has the time of the sender's clock, and that clock can be
 #: minutes different from our clock.
-_CHANNEL_WINDOW = timedelta(minutes=15)
+CHANNEL_WINDOW = timedelta(minutes=15)
+
+#: The largest difference between the sender time in a copy of our own channel message and
+#: the time that MeshTerm stored for the send. The library puts the clock of the computer
+#: on the packet, and MeshTerm stores the time after the companion accepts it. Two
+#: messages with the same text ("test") inside the match window are then two different
+#: messages, and not one message with the copies of both.
+_SEND_SLACK = timedelta(seconds=10)
 
 #: The span of the log that MeshTerm searches around a direct message, before the other
 #: messages of the conversation make it narrower (refer to :func:`direct_window`). This
@@ -194,7 +203,7 @@ def channel_arrivals(
     # Around the arrival time, not the sender time: a sender with a wrong clock put the
     # window hours or years away from its packets.
     at = message.arrived_at
-    frames = repo.packet_frames_between(at - _CHANNEL_WINDOW, at + _CHANNEL_WINDOW)
+    frames = repo.packet_frames_between(at - CHANNEL_WINDOW, at + CHANNEL_WINDOW)
     arrivals: list[Arrival] = []
     for frame in frames:
         raw = frame.raw if isinstance(frame.raw, dict) else {}
@@ -207,6 +216,12 @@ def channel_arrivals(
             continue
         decrypted = decrypt_channel_text(chan_hash, cipher_mac, crypted, [(channel_name, secret)])
         if decrypted is None or not _texts_match(decrypted.text, message.text):
+            continue
+        if (
+            message.outbound
+            and decrypted.sent_at is not None
+            and abs(decrypted.sent_at - message.created_at) > _SEND_SLACK
+        ):
             continue
         arrivals.append(
             Arrival(

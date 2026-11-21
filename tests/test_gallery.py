@@ -68,6 +68,7 @@ from meshterm.platforms import (
     set_platform,
 )
 from meshterm.services.courier import CourierService
+from meshterm.services.heard_by import BEYOND, NEARBY, UNHEARD, WAITING, HeardBy
 from meshterm.services.message_paths import Arrival
 from meshterm.services.monitor_service import ACTIVITY_BUCKETS
 from meshterm.services.records import CATEGORY_BY_ID
@@ -809,6 +810,64 @@ _WOODPECKER = (
     'im3:J!jBVY"9UPkugAX54#9BX:e"FM|cL0G|IS.@$q^=N:4D*B9d1d$450M>W/tOqmq`wqd..bJp|}'
     "d/4v2vpi5BAZ9wD/B"
 )
+
+
+class _GalleryHeard:
+    """A fixed verdict for each of our channel messages, by its text (issue #38)."""
+
+    def __init__(self, verdicts: dict[str, HeardBy]) -> None:
+        self._verdicts = verdicts
+
+    def verdict(self, message: ChatMessage) -> HeardBy | None:
+        return self._verdicts.get(message.text) if message.outbound else None
+
+    def waiting(self, messages) -> bool:  # noqa: ANN001 - the transcript
+        return False
+
+
+def _chat_heard(cols: int, rows: int) -> Screen:
+    """Our channel messages with the four relay marks, and the note of the picked one.
+
+    The marks are the spinner, ``⚠`` (only the near relays sent it back), ``✗`` (no copy),
+    and ``✓ 3`` (three relays past the near relays). The newest message is picked, so its
+    note names the relays and the near relay that carried it out. The names are long, so
+    the note wraps under the body on the PicoCalc.
+    """
+    conv = Conversation(label="Lakeside", is_channel=True, channel_idx=1)
+    messages = [
+        ChatMessage(text="Alice: anyone on the ridge tonight?", is_channel=True),
+        ChatMessage(text="testing the new antenna", outbound=True, is_channel=True, row_id=1),
+        ChatMessage(text="anyone hear this?", outbound=True, is_channel=True, row_id=2),
+        ChatMessage(text="one more try", outbound=True, is_channel=True, row_id=3),
+        ChatMessage(text="heading up the ridge now", outbound=True, is_channel=True, row_id=4),
+    ]
+    heard = _GalleryHeard(
+        {
+            "testing the new antenna": HeardBy(UNHEARD),
+            "anyone hear this?": HeardBy(NEARBY, copies=2),
+            "one more try": HeardBy(WAITING),
+            "heading up the ridge now": HeardBy(
+                BEYOND, beyond=("a1", "b2", "c3"), via=("3d",), copies=4
+            ),
+        }
+    )
+    names = {
+        "a1": "Lakeside-North-Shore",
+        "b2": "Marina-Tower",
+        "c3": "Ridge-Top-Solar",
+        "3d": "Home-Yagi",
+    }
+    screen = ChatScreen(
+        conv,
+        messages,
+        send=None,
+        names={},
+        session=_GallerySession(cols, rows),
+        heard=heard,  # type: ignore[arg-type]
+        hop_name=lambda hop: names.get(hop, hop),
+    )
+    screen.handle("up")
+    return screen
 
 
 def _chat_image(cols: int, rows: int, *, picked: bool = False) -> Screen:
@@ -2036,6 +2095,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("map_find", _map_find),
     _Entry("chat", _chat),
     _Entry("chat_channel_scoped", _chat_channel_scoped),
+    _Entry("chat_heard", _chat_heard),
     _Entry("chat_urls", _chat_urls),
     _Entry("chat_long_url", _chat_long_url),
     _Entry("chat_image", _chat_image),

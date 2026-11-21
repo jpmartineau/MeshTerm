@@ -834,6 +834,17 @@ class ChatService:
             scope=await self._sent_under(asked),
         )
         chat.row_id = self._ctx.repo.record_chat_message(chat, run_id=self._run_id)
+        # The near relays of this send, so that a later change of site does not change
+        # whether the message went past them (refer to meshterm.services.heard_by).
+        if getattr(self._ctx, "outbound_store", None) is not None:
+            try:
+                from .heard_by import near_relays
+                from .outbound import current_choice
+
+                choice = await current_choice(self._ctx)
+                self._ctx.repo.set_near_hops(chat.row_id, near_relays(choice.paths))
+            except Exception as exc:  # noqa: BLE001 - the message went out. Only the mark is less exact
+                self._ctx.log.debug("couldn't keep the near relays of a send: %s", exc)
         return chat
 
     async def _sent_under(self, asked: str | None) -> str | None:

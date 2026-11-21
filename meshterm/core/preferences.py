@@ -327,6 +327,21 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         maximum=2,
     ),
     PrefSpec(
+        key="heard_wait_s",
+        label="Relay wait",
+        help="Wait this long for a relay of a channel message",
+        group="Sending",
+        value_type="int",
+        # A channel message that we sent shows a spinner until a relay that is not a near
+        # relay sends a copy back, or until this wait is over. Then it shows ⚠ (only near
+        # relays) or ✗ (no copy). A flood goes out through the mesh in seconds, and 30 s
+        # also covers a busy channel (refer to meshterm.services.heard_by).
+        default=30,
+        minimum=5,
+        maximum=600,
+        unit="s",
+    ),
+    PrefSpec(
         key="room_relogin_minutes",
         label="Room re-login",
         help="Opening a room this quiet logs in again",

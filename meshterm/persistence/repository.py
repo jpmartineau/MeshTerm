@@ -2252,6 +2252,76 @@ class Repository:
         self._conn.execute("UPDATE messages SET acked = ? WHERE id = ?", (int(acked), message_id))
         self._conn.commit()
 
+    # -- relays that heard our channel messages ---------------------------------------
+
+    def set_near_hops(self, message_id: int, near: tuple[str, ...]) -> None:
+        """Keep the near relays at the time that one of our channel messages went out.
+
+        Thus a change of site later does not change the verdict of the message (refer to
+        :mod:`~meshterm.services.heard_by`).
+
+        Args:
+            message_id: The ``messages`` row of the sent message.
+            near: The near relays, as lowercase hex.
+        """
+        self._conn.execute(
+            "INSERT INTO heard_relays (message_id, near_hops) VALUES (?, ?) "
+            "ON CONFLICT(message_id) DO UPDATE SET near_hops = excluded.near_hops",
+            (message_id, json.dumps(list(near))),
+        )
+        self._conn.commit()
+
+    def settle_heard(
+        self, message_id: int, near: tuple[str, ...], paths: list[tuple[str, ...]]
+    ) -> None:
+        """Store the relay paths of the copies of one message, when no more can come.
+
+        Args:
+            message_id: The ``messages`` row of the sent message.
+            near: The near relays that the verdict used.
+            paths: The relay paths of the copies that came back. An empty list is a stored
+                "no copy came back".
+        """
+        self._conn.execute(
+            "INSERT INTO heard_relays (message_id, near_hops, paths) VALUES (?, ?, ?) "
+            "ON CONFLICT(message_id) DO UPDATE SET near_hops = excluded.near_hops, "
+            "paths = excluded.paths",
+            (message_id, json.dumps(list(near)), json.dumps([list(p) for p in paths])),
+        )
+        self._conn.commit()
+
+    def heard_records(
+        self, message_ids: list[int]
+    ) -> dict[int, tuple[tuple[str, ...] | None, list[tuple[str, ...]] | None]]:
+        """The stored near relays and relay paths of some of our channel messages.
+
+        Args:
+            message_ids: The ``messages`` rows to read.
+
+        Returns:
+            For each row that has a record: the near relays (``None`` when they were not
+            kept), and the relay paths (``None`` when the message is not settled yet).
+        """
+        out: dict[int, tuple[tuple[str, ...] | None, list[tuple[str, ...]] | None]] = {}
+        ids = [int(i) for i in message_ids if i is not None]
+        for start in range(0, len(ids), 500):
+            part = ids[start : start + 500]
+            marks = ",".join("?" * len(part))
+            rows = self._conn.execute(
+                f"SELECT message_id, near_hops, paths FROM heard_relays "
+                f"WHERE message_id IN ({marks})",
+                part,
+            ).fetchall()
+            for row in rows:
+                near = tuple(json.loads(row["near_hops"])) if row["near_hops"] else None
+                paths = (
+                    [tuple(p) for p in json.loads(row["paths"])]
+                    if row["paths"] is not None
+                    else None
+                )
+                out[int(row["message_id"])] = (near, paths)
+        return out
+
     def delete_chat_history(self, peer: str | None) -> int:
         """Delete all the stored messages of one direct conversation.
 

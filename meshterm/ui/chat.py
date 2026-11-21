@@ -40,6 +40,7 @@ from ..core.models import (
 )
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
+from ..services.heard_by import BEYOND, NEARBY, UNHEARD, WAITING, HeardBy, HeardTracker
 from . import pixelart
 from .compose import MentionEditor
 from .pathline import PATH_INK, PathHop
@@ -87,6 +88,12 @@ _CORRECTED = ("?", "warn")
 #: animated spinner instead (refer to :meth:`ChatScreen._delivery_glyph`).
 _DELIVERED = ("✓", "ok")
 _FAILED = ("✗", "err")
+#: The mark of our channel message that only the near relays sent back: it left our radio,
+#: and nothing proves that it went farther (refer to :mod:`~meshterm.services.heard_by`).
+_NEAR_ONLY = ("⚠", "warn")
+#: The time that the chat waits after a channel packet before it looks for copies of our
+#: messages in the packet log. The recorder stores each packet in the background.
+_HEARD_SETTLE_S = 1.0
 
 #: A word between whitespace. The wrap moves a word only as a whole. Thus the run that a
 #: wrap must not cut a URL in is the word that has the URL, with a bracket or a full stop
@@ -285,6 +292,8 @@ class ChatScreen(Screen):
         self_name: str | None = None,
         self_key: str | None = None,
         resend_flood: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None,
+        heard: HeardTracker | None = None,
+        hop_name: Callable[[str], str] | None = None,
     ) -> None:
         """Build the chat screen.
 
@@ -328,8 +337,20 @@ class ChatScreen(Screen):
             resend_flood: Like ``resend``, but it first forgets the route that the device
                 learned to the contact, so that the retry floods (direct chats only).
                 With ``None``, ^R always retries on the route, as it did before.
+            heard: The verdicts on our own channel messages: whether a relay that is not a
+                near relay sent a copy back (refer to :mod:`~meshterm.services.heard_by`).
+                With ``None`` (a direct chat, or a channel with no key), our channel
+                messages show no mark.
+            hop_name: Gives the name of a relay from its hash, for the note under a
+                selected message. With ``None``, the note shows the hashes.
         """
         super().__init__()
+        self._heard_by = heard
+        self._hop_name: Callable[[str], str] = hop_name or (lambda hop: hop)
+        # The task that turns the spinner while one of our channel messages waits for a
+        # relay, and the task that examines the packet log again after a channel packet.
+        self._heard_ticker: asyncio.Task | None = None
+        self._heard_refresh: asyncio.Task | None = None
         self._self_name = self_name
         self._self_key = self_key
         self._scope = scope if conversation.is_channel else None
@@ -714,7 +735,7 @@ class ChatScreen(Screen):
         # the divider. The heading of a select list can also have its description.
         self._sticky_headers = []
         ids: list[int] = []
-        ackeds: list[bool | None] = []
+        ackeds: list[tuple] = []
         selecteds: list[bool] = []
         boundaries: list[int] = []
         prev_group: tuple[bool, str] | None = None
@@ -739,14 +760,17 @@ class ChatScreen(Screen):
             # A slice that the selection changes renders again, now and on the next paint
             # after the selection leaves it: the selected message, and the head of its group.
             marked = selected or idx == picked_head
-            pending = message.acked is None and message.outbound and not message.is_channel
+            mark_key = self._mark_key(message)
+            pending = (message.acked is None and message.outbound and not message.is_channel) or (
+                mark_key[1] is not None and mark_key[1][0] == WAITING
+            )
             reusable = (
                 not marked
                 and not pending
                 and idx < cache_count
                 and not cached_selected[idx]
                 and cached_ids[idx] == id(message)
-                and cached_acked[idx] == message.acked
+                and cached_acked[idx] == mark_key
             )
             # A blank line closes the messages of an author and the messages of a day, where
             # the preferences ask for it (:meth:`~meshterm.ui.tui.screen.Screen.section_spacing`,
@@ -791,7 +815,7 @@ class ChatScreen(Screen):
                     self._selected_end = len(lines)
             prev_group, prev_day = group, day
             ids.append(id(message))
-            ackeds.append(message.acked)
+            ackeds.append(mark_key)
             selecteds.append(marked)
             boundaries.append(len(lines))
 
@@ -963,6 +987,11 @@ class ChatScreen(Screen):
             )
             indent = prefix.cell_len
             lines += render_hanging(Text(" " * indent), note, width, indent=indent)
+        heard = self._heard(message) if selected else None
+        heard_note = self._heard_note(heard) if heard is not None else None
+        if heard_note is not None:
+            indent = prefix.cell_len
+            lines += render_hanging(Text(" " * indent), heard_note, width, indent=indent)
         if image is not None and self._show_images:
             picture = pixelart.decoded(body)
             if picture is not None:
@@ -998,6 +1027,11 @@ class ChatScreen(Screen):
             if message.is_channel:
                 if message.acked is False:
                     text.append("  ⚠ no ack", style="warn")
+                else:
+                    heard = self._heard(message)
+                    if heard is not None:
+                        text.append("  ")
+                        text.append_text(self._heard_mark(heard))
                 text.append_text(self._scope_note(message))
             else:
                 text.append("  ")
@@ -1086,6 +1120,122 @@ class ChatScreen(Screen):
             return self._spinner.text()
         glyph, style = _DELIVERED if acked else _FAILED
         return Text(glyph, style=style)
+
+    # --- relays that heard our channel messages (issue #38) ------------------------
+
+    def _heard(self, message: ChatMessage) -> HeardBy | None:
+        """The verdict on one of our channel messages, or ``None`` when it has no mark."""
+        return self._heard_by.verdict(message) if self._heard_by is not None else None
+
+    def _mark_key(self, message: ChatMessage) -> tuple:
+        """What the mark at the end of a message depends on, for the render cache."""
+        heard = self._heard(message)
+        return (
+            message.acked,
+            None if heard is None else (heard.state, heard.beyond, heard.via),
+        )
+
+    def _heard_mark(self, heard: HeardBy) -> Text:
+        """The mark at the end of our channel message: the marks of a direct message.
+
+        The spinner turns while no relay that is not near sent a copy back, until the
+        ``heard_wait_s`` wait is over. Then ``✓`` and the number of these relays, ``⚠`` for
+        a message that only the near relays sent back, or ``✗`` for no copy at all.
+        """
+        if heard.state == WAITING:
+            return self._spinner.text()
+        if heard.state == BEYOND:
+            glyph, style = _DELIVERED
+            return Text(f"{glyph} {len(heard.beyond)}", style=style)
+        if heard.state == NEARBY:
+            return Text(_NEAR_ONLY[0], style=_NEAR_ONLY[1])
+        glyph, style = _FAILED
+        return Text(glyph, style=style)
+
+    def _heard_note(self, heard: HeardBy) -> Text | None:
+        """The line under a selected channel message of ours: which relays heard it."""
+        note = Text()
+        if heard.state == BEYOND:
+            names = ", ".join(self._hop_name(hop) for hop in heard.beyond)
+            note.append(f"{_DELIVERED[0]} ", style=_DELIVERED[1])
+            note.append(f"heard by {names}", style="muted")
+            if heard.via:
+                via = ", ".join(self._hop_name(hop) for hop in heard.via)
+                note.append(f" · via {via}", style="muted")
+        elif heard.state == NEARBY:
+            note.append(f"{_NEAR_ONLY[0]} ", style=_NEAR_ONLY[1])
+            note.append("only your near relays sent it back", style="muted")
+        elif heard.state == UNHEARD:
+            note.append(f"{_FAILED[0]} ", style=_FAILED[1])
+            note.append("no relay sent it back", style="muted")
+        else:
+            return None
+        return note
+
+    def start_heard(self) -> None:
+        """Examine our channel messages in the background, then turn the spinners."""
+        if self._heard_by is None:
+            return
+
+        async def fill() -> None:
+            assert self._heard_by is not None
+            await self._heard_by.fill(self._messages)
+            self._render_cache = None
+            self._session.invalidate()
+            self._tick_heard()
+
+        self._spawn(fill())
+
+    def track_sent(self, message: ChatMessage) -> None:
+        """Start the verdict of a channel message that we just sent."""
+        if self._heard_by is None:
+            return
+        self._heard_by.note_sent(message)
+        self._tick_heard()
+
+    def heard_packet(self) -> None:
+        """The device heard a channel packet: look again for copies of our messages.
+
+        The recorder stores the packet in the background, so the look waits a moment. One
+        look covers each packet that arrives in that moment.
+        """
+        if self._heard_by is None or (
+            self._heard_refresh is not None and not self._heard_refresh.done()
+        ):
+            return
+
+        async def refresh() -> None:
+            assert self._heard_by is not None
+            await asyncio.sleep(_HEARD_SETTLE_S)
+            if self._heard_by.refresh(self._messages):
+                self._session.invalidate()
+
+        self._heard_refresh = self._spawn(refresh())
+
+    def _tick_heard(self) -> None:
+        """Turn the spinner while one of our channel messages waits for a relay.
+
+        The loop stops when no message waits. At the end of a wait, it looks one more
+        time in the packet log, so that the mark that replaces the spinner is current.
+        """
+        if self._heard_by is None or (
+            self._heard_ticker is not None and not self._heard_ticker.done()
+        ):
+            return
+
+        async def tick() -> None:
+            assert self._heard_by is not None
+            try:
+                while self._heard_by.waiting(self._messages):
+                    await asyncio.sleep(spinner_interval())
+                    self._spinner.tick()
+                    self._session.invalidate()
+                self._heard_by.refresh(self._messages)
+                self._session.invalidate()
+            except Exception:  # noqa: BLE001 - a spinner problem must never break the chat
+                pass
+
+        self._heard_ticker = self._spawn(tick())
 
     def _pick_banner(self) -> Text:
         """A one-line note above the input while a message is selected.
@@ -1599,6 +1749,7 @@ class ChatScreen(Screen):
             message = await self._send(text)
             if message is not None:
                 self._messages.append(message)
+                self.track_sent(message)
             self._status = ""
         except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
             self._status = f"send failed: {exc}"
@@ -1830,6 +1981,7 @@ class ChatScreen(Screen):
                 message = await self._resend_unscoped(target)
                 if message is not None:
                     self._messages.append(message)
+                    self.track_sent(message)
                 self._status = ""
             except Exception as exc:  # noqa: BLE001 - show the error inline, keep the chat open
                 self._status = f"resend failed: {exc}"
@@ -1995,6 +2147,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
 
     paths = await _make_paths_presenter(ctx, conversation, device)
     self_name, self_key = await our_node(ctx)
+    heard, hop_name = await _make_heard_tracker(ctx, conversation, device, contacts)
     screen = ChatScreen(
         conversation,
         history,
@@ -2011,8 +2164,11 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
         self_name=self_name,
         self_key=self_key,
         resend_flood=resend_flood,
+        heard=heard,
+        hop_name=hop_name,
     )
     ctx.chat.set_active(conversation.key)
+    screen.start_heard()
 
     def on_event(event: MeshEvent) -> None:
         message = event.message
@@ -2024,13 +2180,83 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
                 )
             )
 
+    def on_packet(event: MeshEvent) -> None:
+        obs = event.observation
+        raw = obs.raw if obs is not None and isinstance(obs.raw, dict) else {}
+        if raw.get("payload_typename") == "GRP_TXT":
+            screen.heard_packet()
+
     unsubscribe = ctx.events.subscribe(on_event, EventKind.MESSAGE)
+    unsubscribe_packets = (
+        ctx.events.subscribe(on_packet, EventKind.OBSERVATION) if heard is not None else None
+    )
     try:
         await session.run_screen(screen)
     finally:
         unsubscribe()
+        if unsubscribe_packets is not None:
+            unsubscribe_packets()
         ctx.chat.set_active(None)
     return len(screen._messages)
+
+
+async def _channel_secret(conversation: Conversation, device: Any) -> bytes | None:
+    """The key of a channel conversation, from the conversation or from its slot."""
+    secret = conversation.secret
+    if conversation.is_channel and not secret and conversation.channel_idx is not None:
+        try:
+            payload = await device.get_channel(conversation.channel_idx)
+            raw = (payload or {}).get("channel_secret")
+            secret = bytes(raw) if raw else None
+        except Exception:  # noqa: BLE001 - no key, no decrypt. The callers say so
+            secret = None
+    return secret
+
+
+async def _make_heard_tracker(
+    ctx: AppContext, conversation: Conversation, device: Any, contacts: list[Contact]
+) -> tuple[HeardTracker | None, Callable[[str], str] | None]:
+    """The verdicts on our channel messages in this conversation, and a namer for relays.
+
+    A direct chat has its acknowledgements, and a channel with no key at hand cannot match
+    its copies. Both get ``None``, and our messages show no mark.
+    """
+    if not conversation.is_channel:
+        return None, None
+    from ..services import trace_runner
+    from ..services.heard_by import make_tracker
+
+    secret = await _channel_secret(conversation, device)
+    tracker = await make_tracker(ctx, channel_name=conversation.label, secret=secret)
+    if tracker is None:
+        return None, None
+    stored_names, _named_at = ctx.repo.node_names_with_times()
+    resolve = trace_runner.make_node_resolver(contacts, stored_names)
+    return tracker, lambda hop: resolve(hop) or hop
+
+
+async def _past_near_atom(ctx: AppContext, message: ChatMessage, arrivals: list) -> str:
+    """The atom of the paths dialog that counts the relays past our near relays.
+
+    The near relays are the ones kept with the send, or the ones that apply now for a
+    message sent before MeshTerm kept them (refer to :mod:`~meshterm.services.heard_by`).
+    """
+    from ..services.heard_by import judge, near_relays, relay_paths
+    from ..services.outbound import current_choice
+
+    near: tuple[str, ...] | None = None
+    if message.row_id is not None:
+        near, _paths = ctx.repo.heard_records([message.row_id]).get(message.row_id, (None, None))
+    if near is None and getattr(ctx, "outbound_store", None) is not None:
+        try:
+            near = near_relays((await current_choice(ctx)).paths)
+        except Exception:  # noqa: BLE001 - with no outbound paths, each relay counts
+            near = None
+    heard = judge(relay_paths(arrivals), near or (), age_s=float("inf"), wait_s=0.0)
+    count = len(heard.beyond)
+    if not near:
+        return f" · {count} relay{'s' if count != 1 else ''}"
+    return f" · {count} past your near relay{'s' if len(near) != 1 else ''}"
 
 
 async def _with_restore(ctx: AppContext, attempt: Callable[[], Awaitable[Any]]) -> Any:
@@ -2310,14 +2536,7 @@ async def _make_paths_presenter(
     # only gets no white highlight.
     self_name, self_key = await our_node(ctx)
 
-    secret = conversation.secret
-    if conversation.is_channel and not secret and conversation.channel_idx is not None:
-        try:
-            payload = await device.get_channel(conversation.channel_idx)
-            raw = (payload or {}).get("channel_secret")
-            secret = bytes(raw) if raw else None
-        except Exception:  # noqa: BLE001 - no key, no decrypt. The view says so correctly
-            secret = None
+    secret = await _channel_secret(conversation, device)
 
     async def present(message: ChatMessage) -> None:
         peer_key: str | None = None
@@ -2333,6 +2552,8 @@ async def _make_paths_presenter(
                 if arrivals
                 else "no copies in the packet log"
             )
+            if arrivals and message.outbound:
+                summary += await _past_near_atom(ctx, message, arrivals)
         elif conversation.is_channel:
             await session.scroll(
                 Text(

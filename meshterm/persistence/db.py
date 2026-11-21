@@ -12,7 +12,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -187,6 +187,17 @@ CREATE TABLE IF NOT EXISTS node_places (
     peak      INTEGER NOT NULL DEFAULT 0,  -- fine is a peak near its summit
     source    TEXT NOT NULL,      -- 'tiles' or 'nominatim'
     found_at  TEXT NOT NULL       -- UTC ISO-8601
+);
+
+-- Our own channel messages: whether a relay that is not one of our near relays heard them
+-- (refer to meshterm.services.heard_by). near_hops is a JSON list of the near relays at the
+-- time of the send. paths is a JSON list of the relay paths of the copies that came back,
+-- written one time when the message is out of the match window of the packet log. NULL:
+-- not settled yet.
+CREATE TABLE IF NOT EXISTS heard_relays (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    near_hops  TEXT,
+    paths      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_run ON traces(run_id);
