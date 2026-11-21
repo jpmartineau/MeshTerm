@@ -70,12 +70,52 @@ only describe it. The written pages are at the end.
 
 | Feature | What it does | Scripted |
 | --- | --- | --- |
-| **⚙ Preferences** | How MeshTerm behaves, in eight groups: Device, Sending, TX optimize, Watchtower, Map, History, Display, and Diagnostics. The page stages your changes, and you save them with one action at the bottom. MeshTerm writes only the values that you changed to `preferences.toml`. [Configuring MeshTerm](configuration.md) has the detail. | `meshterm preferences show / set / reset` |
+| **⚙ Preferences** | How MeshTerm behaves, in nine groups: Device, Sending, TX optimize, Watchtower, Map, History, Sound, Display, and Diagnostics. The page stages your changes, and you save them with one action at the bottom. MeshTerm writes only the values that you changed to `preferences.toml`. [Configuring MeshTerm](configuration.md) has the detail. | `meshterm preferences show / set / reset` |
 | **🩺 Diagnostics** | One block of information that each bug report starts with. It shows which build you have and how you installed it, the operating system, the terminal and its size, and the radio and its link. It also shows the verdicts from boot time that no other screen shows (icons, powerline, platform flavour, and the reasons), and how much history MeshTerm stored. It has nothing private: no keys, passwords, positions, or contact names. It describes the mesh only as counts for each table and the span of time that the tables cover. Press `a` to anonymize it: your account name in the home folder and the addresses of your radio and hosts are masked, and each keeps a tidbit (`j*********u`, `DA:xx:xx:xx:7C:7C`). Press `s` to save the block beside the log, to attach to a report. The **Anonymize** preference opens the page anonymized, and masks the log too. | `meshterm diagnostics [--out PATH] [--anonymize]` |
-| **📖 About MeshTerm** | What MeshTerm is, where it came from, and the terms of its licence. It includes the map credit, the font credit, and the licence URL. | `meshterm about` |
+| **📖 About MeshTerm** | What MeshTerm is, where it came from, and the terms of its licence. It includes the map credit, the font credit, the sound credit, and the licence URL. | `meshterm about` |
 | **👤 About the author** | The person behind MeshTerm, on the mesh and away from it. | `meshterm about-author` |
 | **🔗 Join Discord** | The community server. The page has one invite link and a QR code of the link, which a phone can read. | `meshterm discord` |
 | **💰 Support MeshTerm** | What keeps MeshTerm going, and the ways to help it, with money and without money. | `meshterm support` |
+
+## Sounds
+
+MeshTerm plays a sound when something arrives that you want to know about now:
+
+| Event | When it plays |
+| --- | --- |
+| Direct message | A DM arrives |
+| Mention | A message in any conversation mentions your node (`@[Your name]`) |
+| Channel message | A message arrives on a channel that you set to **All** |
+| Room post | A post arrives in a room that you set to **All** |
+| Battery low | The battery goes below 25% (the **Battery low** preference). It plays one time, and again only after the battery is 5 points higher or charges |
+| Packet tick | A very short tick for each packet heard that plays no other sound. It is off until you turn on **Packet tick**, and it plays at most four times each second |
+
+The conversation that is open on the screen makes no sound, because you already see it.
+
+Each channel, DM, and room has a **Sound** row: on the channel page, on the node page of
+the contact, and on the room page. Select **Off**, **Mentions**, **All messages**, or
+**Default**. Default follows the preference for that kind of conversation: all messages
+for a DM, and mentions for a channel or a room. The mute of a channel (🔕) is a different
+setting. It removes the channel from the unread count, but a mention in it still plays a
+sound.
+
+**Ctrl+S** mutes or unmutes the sounds from any screen. The header shows 🔊 while the
+sounds play and 🔇 while they are muted. The **Sound** row above Quit in the main menu
+does the same. To have no sound at all, select the **no sound** theme on the Preferences
+page. The other themes are **Android** (the default) and **terminal bell**, which rings the
+bell of your terminal, also over SSH.
+
+**Volume** is a slider with ten steps on the Preferences page. Each step plays the
+channel message sound, so that you hear the level before you apply it.
+
+When no sound plays, the title of the screen can flash instead. The **Flash** preference
+selects when: off, on, or **when silent** (the default), which flashes when the sounds are
+muted or the theme is no sound. The PicoCalc has no sound, so there each notification
+flashes.
+
+MeshTerm plays the sounds through the player of your computer: `winsound` on Windows,
+`afplay` on macOS, and `pw-play`, `paplay`, or `aplay` on Linux. If none of them works,
+MeshTerm writes one line in its log and continues with no sound.
 
 ## Leaving MeshTerm
 

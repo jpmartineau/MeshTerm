@@ -183,7 +183,10 @@ deliberately, one at a time, and say why in the code.
   keeps the chip that asked: its F3 reads `Quit!` and sends the same `quit`, which with
   the question up is the leaving — one key pressed twice, as ^Q is.
   `test_navigation` walks every string literal in the package to keep them out of the rest
-  of the UI.
+  of the UI. **^S** is the third global verb (JP, 2026-11-20): it mutes or unmutes the
+  sounds (`sound_muted`, `services/sound.py`), answered in `_dispatch` through
+  `set_sound_toggle`, shown by the header's 🔊/🔇 and the menu's Sound row above Quit, never
+  a chip. The PIN reveal moved from ^S to ^E for it. "No sound" is a *theme*, not the mute.
 - **Holding Esc quits**, from anywhere, wherever MeshTerm can tell a key is held
   (`services/hold_to_quit.py`): a front end that reads its own keys (the emulator, both
   devices), or a probe that asks the keyboard whether a terminal's Esc is still down
@@ -560,6 +563,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   🔒 lock (a locked contact, a private channel) · 🔓 unlock · 🗑 clear/delete · ✎ compose/edit ·
   ⚙ parameter · `#` count · ▶ run · ⚡ explore/probe · ★ best/winner · ⭐ watch ·
   📤 send now · 📨 courier/queue · 💬 chat · 🔔 notify · 🔕 mute (notifications off) ·
+  🔊 sound on / a conversation's Sound row · 🔇 sounds muted (header, menu row) ·
   📱 QR · 🔗 link · ↻ re-read · ↕ reorder · ⇄ reverse (flip a path's direction) ·
   🔖 region/scope · 📌 rooms · 🏆 trophy case/record · ⌨ command line · 📖 read/about · 💰 support/donate ·
   🎨 pixel image (an MCOimg picture in a message) · 🚪 quit. Packet-class icons (feed/viewer

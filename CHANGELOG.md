@@ -20,6 +20,21 @@ can change how things behave. It does not only add new things.
   sees only the repeaters that your radio hears, and only while it is connected.
   `meshterm chat history --channel` shows the same count in a `HEARD` column, and
   `--json` gives `heard` and `heard_by` (#38).
+- **MeshTerm plays sounds for the messages that you want to know about.** A DM, a mention
+  of your node, a channel message, a room post, and a low battery each have their own
+  sound, from Android's set (the Android Open Source Project, under the same licence as
+  MeshTerm). Each channel, DM, and room has a *Sound* row: off, mentions, all messages, or
+  the default for its kind (all messages for a DM, mentions for a channel or a room).
+  Ctrl+S mutes or unmutes the sounds from any screen, and the header shows 🔊 or 🔇. The
+  new *Sound* group of preferences has the theme (Android, terminal bell, or no sound), a
+  volume slider of ten steps that plays each step, a short tick for each packet heard (off
+  by default), and a flash of the title for a notification that plays no sound. The
+  PicoCalc has no sound, so there each notification flashes. The idea came from the
+  MeshTerm Discord.
+
+### Changed
+
+- **Ctrl+E shows or hides the pairing PIN.** It was Ctrl+S, which now mutes the sounds.
 
 ### Fixed
 
