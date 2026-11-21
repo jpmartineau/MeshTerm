@@ -486,6 +486,12 @@ class ChatService:
 
         The rule (JP, 2026-11-21):
 
+        * A message from the queue of the companion (``waited``) makes no sound, a mention
+          included. The companion keeps what arrived while MeshTerm was not connected, and
+          gives all of it at the connect. It is old news, and one sound for each message
+          was a burst of sounds at each start.
+        * A room post of the catch-up after a login makes no sound, for the same reason
+          (refer to :meth:`~meshterm.services.rooms.RoomService.catching_up`).
         * A mention of our node in a channel or a room follows ``sound_mention``. A
           mention in a DM is not a mention here: the message is already for us, so it plays
           the DM sound.
@@ -503,7 +509,10 @@ class ChatService:
         A failure here must never stop the recording of messages, so it only goes to the log.
         """
         sound = getattr(self._ctx, "sound", None)
-        if sound is None:
+        if sound is None or message.waited:
+            return
+        rooms = getattr(self._ctx, "rooms", None)
+        if message.is_post and rooms is not None and rooms.catching_up(message.sender):
             return
         try:
             prefs = self._ctx.preferences

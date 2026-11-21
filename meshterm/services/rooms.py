@@ -33,6 +33,14 @@ if TYPE_CHECKING:
     from ..context import AppContext
 
 
+#: How long a room must send nothing before its catch-up counts as finished, in seconds.
+#: After a login, a room sends the posts that it kept for us, one after another. They are
+#: posts that were already there, so they play no sound (JP, 2026-11-21: "Reading what
+#: already was there shouldn't trigger sounds"). The room has no mark for the last post of
+#: its catch-up, and its clock is often wrong, so the end is a pause instead of a time.
+CATCH_UP_QUIET_S = 8.0
+
+
 class RoomService:
     """Joins rooms, remembers what they let us do, and decides when to log in again."""
 
@@ -51,6 +59,9 @@ class RoomService:
         #: The login in progress to each room, and the password that it carries, indexed by
         #: peer.
         self._inflight: dict[str, tuple[asyncio.Future, str]] = {}
+        #: The rooms that are sending their catch-up after a login, with the time of the last
+        #: sign of it (the login or a post), on the monotonic clock, indexed by peer.
+        self._catching_up: dict[str, float] = {}
 
     @staticmethod
     def _peer(room: Contact) -> str:
@@ -126,6 +137,33 @@ class RoomService:
         """
         if peer:
             self._heard[peer.lower()] = time.monotonic()
+
+    def catching_up(self, peer: str | None, now: float | None = None) -> bool:
+        """True if a post from ``peer`` is part of the catch-up after a login.
+
+        A post that comes less than :data:`CATCH_UP_QUIET_S` after the login or after the
+        last post of the catch-up is part of it, and it extends the catch-up. The first pause
+        longer than that ends it. A post that carries the prefix of the room at any width
+        counts, as for :meth:`heard_recently`.
+
+        Args:
+            peer: The key prefix of the room, as the sender of the post carried it.
+            now: The monotonic time now. Tests give it.
+
+        Returns:
+            ``True`` while the room sends what it already had.
+        """
+        if not peer:
+            return False
+        peer = peer.lower()
+        now = time.monotonic() if now is None else now
+        for known, last in list(self._catching_up.items()):
+            if known.startswith(peer) or peer.startswith(known):
+                if now - last < CATCH_UP_QUIET_S:
+                    self._catching_up[known] = now
+                    return True
+                del self._catching_up[known]
+        return False
 
     def heard_recently(self, room: Contact) -> bool:
         """True if ``room`` was heard within ``room_relogin_minutes``: then no login is necessary.
@@ -220,6 +258,9 @@ class RoomService:
     async def _login_once(self, room: Contact, password: str, *, flood: bool) -> RoomLogin:
         """One login exchange, and what its result means for the stores and the session."""
         device = await self._ctx.device()
+        # The room can start its catch-up as soon as it has the login, before the reply
+        # reaches us. Thus the catch-up starts here, and the accept below starts it again.
+        self._catching_up[self._peer(room)] = time.monotonic()
         if flood:
             await device.reset_route(room)
             # The route in the contact cache is not valid now. The next read gets it again
@@ -239,4 +280,5 @@ class RoomService:
             peer = self._peer(room)
             self._access[peer] = login.access
             self._heard[peer] = time.monotonic()
+            self._catching_up[peer] = time.monotonic()
         return login

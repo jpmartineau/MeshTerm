@@ -2974,6 +2974,27 @@ async def test_sound_a_mention_as_a_message_plays_its_kind(
         await device.disconnect()
 
 
+async def test_sound_the_backlog_of_the_companion_is_silent(
+    tmp_path: Path, repo: Repository
+) -> None:
+    """Messages that waited in the companion before the connect play nothing, mentions too."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        await _record(chat, ctx, Message(text="hello", sender="d4e5f6a7", waited=True))
+        text = "Ann: @[MockCompanion] look"
+        await _record(chat, ctx, Message(text=text, channel=0, is_channel=True, waited=True))
+        assert events == []
+        await _record(chat, ctx, Message(text="live", sender="d4e5f6a7"))
+        assert events == [SoundEvent.DIRECT_MESSAGE]
+        # The backlog is still stored and counted: only the sound is skipped.
+        assert chat.unread("dm:d4e5f6a7") == 2
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
 async def test_sound_a_conversation_with_no_row_is_silent(tmp_path: Path, repo: Repository) -> None:
     """A message that the Chat picker cannot list (a repeater reply) plays nothing."""
     device, ctx, chat, events = await _sound_chat(repo, tmp_path)
@@ -4182,3 +4203,22 @@ def test_public_offer_add_writes_slot_zero(monkeypatch: pytest.MonkeyPatch) -> N
     added = asyncio.run(_add_public_channel(ctx))
     assert writes == [(0, "Public", DEFAULT_PUBLIC_SECRET)]
     assert added is not None and added.on_device and added.channel_idx == 0
+
+
+async def test_sound_a_room_catch_up_is_silent(tmp_path: Path, repo: Repository) -> None:
+    """The posts that a room sends after a login were already there, so they play nothing."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        catching_up = [True]
+        ctx.rooms = SimpleNamespace(catching_up=lambda peer: catching_up[0])
+        post = Message(text="old news", sender="aabbccddeeff", author="11223344")
+        await chat._play_sound(post, "dm:aabbccddeeff")
+        assert events == []
+        catching_up[0] = False
+        await chat._play_sound(post, "dm:aabbccddeeff")
+        assert events == [SoundEvent.ROOM_POST]
+    finally:
+        await chat.stop()
+        await device.disconnect()

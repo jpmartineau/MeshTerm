@@ -334,3 +334,16 @@ def test_a_mention_as_a_message_turns_the_mention_event_off(tmp_path: Path) -> N
     service, player, _, _, _ = _service(tmp_path, sound_mention="regular")
     assert service.notify(SoundEvent.MENTION) is False
     assert player.played == []
+
+
+def test_a_room_catch_up_lasts_until_a_pause() -> None:
+    """After a login, posts are part of the catch-up until the room pauses 8 s."""
+    from meshterm.services.rooms import CATCH_UP_QUIET_S, RoomService
+
+    rooms = RoomService(SimpleNamespace())  # type: ignore[arg-type]
+    assert rooms.catching_up("a1b2c3d4e5f6", now=10.0) is False  # no login yet
+    rooms._catching_up["a1b2c3d4e5f6"] = 100.0  # the login
+    assert rooms.catching_up("A1B2C3D4", now=103.0) is True  # a shorter prefix matches
+    assert rooms.catching_up("a1b2c3d4e5f6", now=103.0 + CATCH_UP_QUIET_S - 1) is True
+    assert rooms.catching_up("a1b2c3d4e5f6", now=200.0) is False  # the pause ended it
+    assert rooms.catching_up("a1b2c3d4e5f6", now=201.0) is False
