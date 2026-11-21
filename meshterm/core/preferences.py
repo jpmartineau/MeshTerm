@@ -512,7 +512,7 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_theme",
         label="Sound theme",
-        help="Which sounds play",
+        help="Which set of sounds to use",
         group="Sound",
         value_type="enum",
         # Android, and not muted (JP, 2026-11-20). "No sound" is a theme, not a mute: the
@@ -524,8 +524,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_muted",
         label="Mute",
-        help="^S mutes on any screen",
-        question="Mute the sounds? ^S also mutes or unmutes them on any screen",
+        help="Silence all sounds (^S)",
+        question="Mute all sounds? ^S does the same on any screen",
         group="Sound",
         value_type="bool",
         # A mute is for now, and the theme is for always. ^S changes this preference from
@@ -536,8 +536,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_volume",
         label="Volume",
-        help="1 is 10%, 10 is 100%",
-        question="How loud the sounds play: 1 is 10%, 10 is 100%",
+        help="How loud sounds play",
+        question="How loud sounds play, from 1 (10%) to 10 (100%)",
         group="Sound",
         value_type="int",
         # A slider of ten steps (JP, 2026-11-20). MeshTerm scales the samples itself, so
@@ -550,8 +550,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="notify_flash",
         label="Flash",
-        help="Flash the title instead",
-        question="When the title flashes for a notification",
+        help="Flash the title on new messages",
+        question="When should the title flash for a new message?",
         group="Sound",
         value_type="enum",
         # When silent: the flash replaces a sound that does not play, and it does not add to
@@ -565,8 +565,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_dm",
         label="Direct message",
-        help="When a DM arrives",
-        question="Play a sound when a direct message arrives",
+        help="Sound for new direct messages",
+        question="Play a sound for new direct messages?",
         group="Sound",
         value_type="bool",
         default=True,
@@ -575,11 +575,11 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_mention",
         label="Mention",
-        help="Always: also muted channels",
+        help="Sound when someone names you",
         question=(
-            "How a mention of your node plays. Always: the mention sound, also on a muted"
-            " channel. On: the mention sound, under the rules of other messages. As a"
-            " message: the sound of a channel message or a room post"
+            "What plays when someone mentions you. Always: the mention sound, even on a"
+            " muted channel. On: the mention sound, unless the channel is muted. As a"
+            " message: the usual channel or room sound"
         ),
         group="Sound",
         value_type="enum",
@@ -590,8 +590,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_channel",
         label="Channel message",
-        help="Not on a muted channel",
-        question="Play a sound when a message arrives on a channel that is not muted",
+        help="Sound for new channel messages",
+        question="Play a sound for new channel messages? Muted channels stay quiet",
         group="Sound",
         value_type="bool",
         default=True,
@@ -600,8 +600,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_room",
         label="Room post",
-        help="When a room sends a post",
-        question="Play a sound when a room sends a new post",
+        help="Sound for new room posts",
+        question="Play a sound for new room posts?",
         group="Sound",
         value_type="bool",
         default=True,
@@ -610,8 +610,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_on_screen",
         label="On-screen chat",
-        help="The open conversation too",
-        question="Play sounds for the conversation that is open on the screen",
+        help="Play sounds for the open chat",
+        question="Play sounds for the chat you have open?",
         group="Sound",
         value_type="bool",
         # On (JP, 2026-11-21): the user can look away from a screen that stays open.
@@ -621,8 +621,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_battery",
         label="Battery low",
-        help="When the battery goes low",
-        question="Play a sound when the battery goes below the low level",
+        help="Sound when the battery is low",
+        question="Play a sound when the battery gets low?",
         group="Sound",
         value_type="bool",
         default=True,
@@ -631,8 +631,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="battery_low_pct",
         label="Low level",
-        help="Where the battery is low",
-        question="The battery level below which the battery sound plays",
+        help="When the battery counts as low",
+        question="The battery is low below this level",
         group="Sound",
         value_type="int",
         # 25: the level where the gauge of the header changes to its low band (batt.low).
@@ -645,8 +645,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="packet_tick",
         label="Packet tick",
-        help="A tick for other packets",
-        question="Play a short tick for each packet heard that plays no other sound",
+        help="Tick for every other packet",
+        question="Play a short tick for each packet that has no sound of its own?",
         group="Sound",
         value_type="bool",
         # Off: a busy mesh can send many packets each minute. The service plays at most one
