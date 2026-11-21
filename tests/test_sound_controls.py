@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from types import SimpleNamespace
 
@@ -116,3 +117,36 @@ def test_ctrl_s_is_the_sound_chord_and_ctrl_e_reveals() -> None:
     """^S turns the sounds on or off, and ^E shows a concealed value (JP, 2026-11-20)."""
     assert _CTRL_LETTER_CHORDS["s"] == "sound"
     assert _CTRL_LETTER_CHORDS["e"] == "reveal"
+
+
+def test_the_title_flashes_in_reverse_video_for_a_short_time() -> None:
+    """The flash draws the title in reverse video, and the title comes back after FLASH_S."""
+    from meshterm.ui.tui import frame
+
+    frame.flash_title(now=100.0)
+    assert frame.flashing(now=100.1)
+    assert not frame.flashing(now=100.0 + frame.FLASH_S + 0.01)
+    frame.flash_title(now=0.0)  # long ago: the next test sees no flash
+    assert frame._title_markup("Nodes", "title.border") == "[title.border]Nodes[/]"
+
+
+def test_the_flash_reaches_the_drawn_title(regular: None) -> None:
+    """While the flash lasts, the composed frame carries the reverse attribute (SGR 7)."""
+    import time
+
+    from rich.text import Text
+
+    from meshterm.ui.tui import frame
+    from meshterm.ui.tui.screen import ScrollScreen
+
+    screen = ScrollScreen(Text("body"), title="Nodes", floating=False)
+    plain = frame.compose_base(Text(""), screen, screen.footer_hint, 72, 24)
+    frame.flash_title(now=time.monotonic())
+    try:
+        lit = frame.compose_base(Text(""), screen, screen.footer_hint, 72, 24)
+    finally:
+        frame.flash_title(now=0.0)
+    first = lit.split("\n")[0]
+    codes = [c.split(";") for c in re.findall(r"\x1b\[([0-9;]*)m", first)]
+    assert any("7" in c for c in codes)
+    assert plain.split("\n")[0] != first

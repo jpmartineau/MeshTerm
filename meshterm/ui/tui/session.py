@@ -836,6 +836,22 @@ class TuiSession:
         if output is not None:
             output.bell()
 
+    def flash(self) -> None:
+        """Flash the title of the frame, for a notification that plays no sound.
+
+        The title shows in reverse video for :data:`~meshterm.ui.tui.frame.FLASH_S`. The
+        session paints now, and again when the time ends, so that the title comes back.
+        """
+        from . import frame
+
+        frame.flash_title()
+        self.invalidate()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.call_later(frame.FLASH_S + 0.02, self.invalidate)
+
     def set_esc_probe(self, down: Callable[[], bool] | None) -> None:
         """Declare how to ask whether the Esc key is physically down, for the Esc of a terminal.
 

@@ -10,6 +10,7 @@ past it.
 from __future__ import annotations
 
 import re
+import time
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
 
@@ -180,6 +181,44 @@ def _breathing_room(body_len: int, budget: int) -> int:
     return 1 if body_len + 2 <= budget else 0
 
 
+#: How long the title flashes for a notification, in seconds (refer to :func:`flash_title`).
+FLASH_S = 0.3
+
+#: The monotonic time until which the title flashes.
+_flash_until = 0.0
+
+
+def flash_title(now: float | None = None) -> None:
+    """Flash the title of the frame for :data:`FLASH_S` seconds: the notification flash.
+
+    The title shows in reverse video until the time ends. The caller paints at once, and
+    again when the time ends (refer to :meth:`~meshterm.ui.tui.session.TuiSession.flash`).
+    The flash is the way to see a notification where no sound plays: on the PicoCalc, with
+    the sounds muted, or with the "no sound" theme (refer to :mod:`meshterm.services.sound`).
+
+    Args:
+        now: The monotonic time now. Tests give it.
+    """
+    global _flash_until
+    _flash_until = (time.monotonic() if now is None else now) + FLASH_S
+
+
+def flashing(now: float | None = None) -> bool:
+    """Whether the title flashes now."""
+    return (time.monotonic() if now is None else now) < _flash_until
+
+
+def _title_markup(title: str, style: str) -> str:
+    """The markup of a panel title, in reverse video while it flashes.
+
+    The reverse is a markup tag of its own inside the style tag. Rich does not resolve a
+    theme name and an attribute in one style string (``reverse title.border``).
+    """
+    if flashing():
+        return f"[{style}][reverse]{title}[/reverse][/]"
+    return f"[{style}]{title}[/]"
+
+
 def _panel_box(
     title: str,
     visible: list[str],
@@ -223,7 +262,7 @@ def _panel_box(
     subtitle = f"[{hint_style(border)}]{' · '.join(atoms)}[/]" if atoms else None
     return Panel(
         body,
-        title=f"[{title_style(border)}]{title}[/]" if title else None,
+        title=_title_markup(title, title_style(border)) if title else None,
         subtitle=subtitle,
         subtitle_align="right" if caption else "center",
         border_style=border,
@@ -367,6 +406,8 @@ def _title_bar(
             break
     rule_span = max(0, cols - head_span - tail_span - stat_span)
     heading = screen.bar_title(title, title_style(border)) if title else Text()
+    if title and flashing():
+        heading.stylize("reverse")
     if status and label_w > rule_span - 2:
         # One rule cell on each side, and the remaining cells for the title. The status stays.
         heading.truncate(max(1, rule_span - 4), overflow="ellipsis")
@@ -472,7 +513,18 @@ def compose_base(
         # Rich sets the padded title into the inner ``cols - 4`` cells of the rule.
         title = fitted_title(base, cols - 4 - 2)
         flush = base.flush
-        key = (cols, rows, title, caption, flush, footer_hint, more_above, more_below, *visible)
+        key = (
+            cols,
+            rows,
+            title,
+            flashing(),
+            caption,
+            flush,
+            footer_hint,
+            more_above,
+            more_below,
+            *visible,
+        )
         if footer_lane is None and _BASE_BOX_CACHE is not None and _BASE_BOX_CACHE[0] == key:
             body = _BASE_BOX_CACHE[1]
         else:

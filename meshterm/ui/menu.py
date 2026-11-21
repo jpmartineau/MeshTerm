@@ -483,9 +483,10 @@ async def run_menu(ctx: AppContext) -> None:
     session.set_quit_confirm(lambda: _confirm_quit(ctx, session))
     # What a held Esc engages while its dialog is open. The app keeps it while it exits.
     session.set_quiesce(lambda: _off_the_air(ctx))
-    # ^S mutes or unmutes the sounds from any screen. The bell theme rings the terminal.
+    # ^S mutes or unmutes the sounds from any screen. The bell theme rings the terminal, and
+    # a notification with no sound can flash the title.
     session.set_sound_toggle(lambda: _toggle_sound(ctx))
-    ctx.sound.set_hooks(bell=session.bell)
+    ctx.sound.set_hooks(bell=session.bell, flash=session.flash)
     # Where a terminal gives the keys, MeshTerm asks the keyboard whether Esc is still
     # held. Thus a held Esc quits there too. The emulator reads its keys itself, and the
     # keyboard of its machine is not the keyboard of the handheld.
