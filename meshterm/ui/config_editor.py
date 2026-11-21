@@ -486,7 +486,7 @@ def _setting_value(
 
 
 class _ConfigMenu(SelectScreen):
-    """The list of the editor, with the row of the pairing PIN concealed until ``^S`` shows it.
+    """The list of the editor, with the row of the pairing PIN concealed until ``^E`` shows it.
 
     It does all that a grouped select list does. It also has the same toggle as the
     Device info page: the same chord, the same chip, and the same words. The two pages

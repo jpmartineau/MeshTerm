@@ -30,7 +30,7 @@ from .tui.screen import ScrollScreen
 #: out with two different keys, depending on the page, the user would have one more thing
 #: to learn with no benefit. A chord also must be *intended*: a PIN never appears because a
 #: hand touched a letter.
-REVEAL_KEY = "^S"
+REVEAL_KEY = "^E"
 
 
 class DeviceInfoScreen(ScrollScreen):
@@ -112,7 +112,7 @@ class DeviceInfoScreen(ScrollScreen):
         """Toggle the PIN, or scroll or dismiss, as each result screen does.
 
         The chord and the chip of the lane arrive as the same action. Thus the chip is not a
-        second implementation of the key (``^S`` is bound one time, in the chord table of the
+        second implementation of the key (``^E`` is bound one time, in the chord table of the
         session).
         """
         if action == "reveal":

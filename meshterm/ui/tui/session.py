@@ -102,6 +102,9 @@ from .spinner import spinner_interval
 #: ``IXON``/``IXOFF``, so ^Q is not XON here.
 _CTRL_LETTER_CHORDS: dict[str, str] = {
     "c": "quit",
+    # ^E shows or hides a concealed value, for example the pairing PIN (JP, 2026-11-20: it
+    # was ^S, which the sound mute took). No terminal or multiplexer takes it in raw mode.
+    "e": "reveal",
     # ^G logs in to the room that a room screen shows. In the input, ^G is not a special key:
     # it is the bell only in output, and no terminal or multiplexer takes it.
     "g": "login",
@@ -121,10 +124,6 @@ _CTRL_LETTER_CHORDS: dict[str, str] = {
     "p": "paths",
     "q": "quit",
     "r": "retry",
-    # ^S is the XOFF key. It is safe here for the same reason that ^Q is not XON (refer to
-    # the text above): the raw mode clears IXON/IXOFF. Thus the terminal never takes it to
-    # freeze the screen.
-    "s": "reveal",
     "u": "url_code",
     "v": "paste_clipboard",
     "w": "to_menu",

@@ -1763,7 +1763,7 @@ def _device_info(cols: int, rows: int) -> Screen:
 
 
 def _device_info_revealed(cols: int, rows: int) -> Screen:
-    # The same page after ^S: the widest state of the row that the other case masks.
+    # The same page after ^E: the widest state of the row that the other case masks.
     screen = _device_info(cols, rows)
     screen.handle("reveal")
     return screen
@@ -1780,7 +1780,7 @@ def _config_editor(cols: int, rows: int) -> Screen:
 
 
 def _config_editor_revealed(cols: int, rows: int) -> Screen:
-    # The same list after ^S, where the PIN row is at its widest.
+    # The same list after ^E, where the PIN row is at its widest.
     screen = _config_editor(cols, rows)
     screen.handle("reveal")
     return screen
