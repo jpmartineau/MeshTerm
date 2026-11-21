@@ -304,11 +304,12 @@ def test_no_tick_is_scheduled_when_the_tick_is_off(tmp_path: Path) -> None:
 
 
 def test_each_event_has_a_switch_on_by_default_except_the_tick() -> None:
-    """Each event names a preference. All are on by default, except the packet tick."""
+    """Each event names a preference, on by default except the tick. A mention has a rule."""
     from meshterm.core.preferences import get_spec
     from meshterm.services.sound import EVENT_PREFERENCE
 
-    assert set(EVENT_PREFERENCE) == set(SoundEvent)
+    assert set(EVENT_PREFERENCE) == set(SoundEvent) - {SoundEvent.MENTION}
+    assert get_spec("sound_mention").default == "always"
     for event, key in EVENT_PREFERENCE.items():
         assert get_spec(key).default is (event is not SoundEvent.PACKET_TICK)
 
@@ -325,4 +326,11 @@ def test_the_battery_switch_silences_the_battery_sound(tmp_path: Path) -> None:
     """With ``sound_battery`` off, a low battery plays nothing."""
     service, player, _, _, _ = _service(tmp_path, sound_battery=False)
     service.note_battery(10, charging=False)
+    assert player.played == []
+
+
+def test_a_mention_as_a_message_turns_the_mention_event_off(tmp_path: Path) -> None:
+    """With the ``regular`` rule, the mention event plays nothing of its own."""
+    service, player, _, _, _ = _service(tmp_path, sound_mention="regular")
+    assert service.notify(SoundEvent.MENTION) is False
     assert player.played == []

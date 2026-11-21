@@ -486,34 +486,47 @@ class ChatService:
 
         The rule (JP, 2026-11-21):
 
-        * The open conversation makes no sound, the same as its unread count: the user
-          already sees the message.
-        * A muted channel (``muted``, refer to MuteStore) makes no sound, also for a
-          mention. A mute turns off the notifications of the channel, and a sound is one.
-        * A mention of our node plays the mention sound. Other messages play the sound of
-          their kind: a DM, a channel message, or a room post.
+        * A mention of our node in a channel or a room follows ``sound_mention``. A
+          mention in a DM is not a mention here: the message is already for us, so it plays
+          the DM sound.
+        * ``always`` plays the mention sound whatever the rules below say: on a muted
+          channel, with the switch of its kind off, and in the open conversation.
+        * The open conversation plays nothing when ``sound_on_screen`` is off.
+        * A muted channel (``muted``, refer to MuteStore) plays nothing. A mute turns off the
+          notifications of the channel, and a sound is one.
+        * ``on`` plays the mention sound. ``regular`` plays the sound of the kind, as for any
+          other message: a channel message or a room post.
         * Each event has its own switch (refer to
-          :data:`~meshterm.services.sound.EVENT_PREFERENCE`). When the mention switch is
-          off, a mention plays the sound of its kind instead. When the switch of the kind is
-          off too, nothing plays.
+          :data:`~meshterm.services.sound.EVENT_PREFERENCE`), which the sound service
+          checks.
 
         A failure here must never stop the recording of messages, so it only goes to the log.
         """
-        if key == self._active or muted:
-            return
         sound = getattr(self._ctx, "sound", None)
         if sound is None:
             return
         try:
+            prefs = self._ctx.preferences
             if message.is_channel:
                 event = SoundEvent.CHANNEL_MESSAGE
             elif message.is_post:
                 event = SoundEvent.ROOM_POST
             else:
                 event = SoundEvent.DIRECT_MESSAGE
-            if sound.event_on(SoundEvent.MENTION) and await self._mentions_us(message.text):
-                event = SoundEvent.MENTION
-            sound.notify(event)
+            rule = prefs.sound_mention
+            mention = (
+                event is not SoundEvent.DIRECT_MESSAGE
+                and rule != "regular"
+                and await self._mentions_us(message.text)
+            )
+            if mention and rule == "always":
+                sound.notify(SoundEvent.MENTION)
+                return
+            if key == self._active and not prefs.sound_on_screen:
+                return
+            if muted:
+                return
+            sound.notify(SoundEvent.MENTION if mention else event)
         except Exception as exc:  # noqa: BLE001 - a sound must never stop the recorder
             self._ctx.log.debug("chat: sound failed: %s", exc)
 

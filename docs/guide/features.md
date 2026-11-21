@@ -85,17 +85,23 @@ has its own sound, and its own switch on the Preferences page:
 | Event | When it plays | Default |
 | --- | --- | --- |
 | Direct message | A DM arrives | on |
-| Mention | A message mentions your node (`@[Your name]`). With this switch off, the message plays the sound of its kind | on |
+| Mention | A message in a channel or a room mentions your node (`@[Your name]`). A mention in a DM plays the DM sound | always |
 | Channel message | A message arrives on a channel | on |
 | Room post | A room sends a new post | on |
 | Battery low | The battery goes below the **Low level** (25%). It plays one time, and again only after the battery is 5 points higher or charges | on |
 | Packet tick | A very short tick for each packet heard that plays no other sound, at most four times each second | off |
 
-Two things are always silent:
+A channel that you muted (🔕) is silent, because the mute turns off all of its
+notifications. The **On-screen chat** switch (on by default) decides whether the
+conversation that is open on the screen plays its sounds too.
 
-- The conversation that is open on the screen, because you already see it.
-- A channel that you muted (🔕), also for a mention. The mute turns off all of the
-  notifications of the channel.
+**Mention** has three values:
+
+- **always** (the default): the mention sound plays, also on a muted channel, with the
+  **Channel message** or **Room post** switch off, and with **On-screen chat** off.
+- **on**: the mention sound plays, under the same rules as other messages.
+- **as a message**: a mention is a channel message or a room post, with their sound and
+  their rules.
 
 **Ctrl+S** mutes or unmutes the sounds from any screen. The header shows 🔊 while the
 sounds play and 🔇 while they are muted. The **Sound** row above Quit in the main menu

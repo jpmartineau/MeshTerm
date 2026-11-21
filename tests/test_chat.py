@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from rich.cells import cell_len
@@ -2783,25 +2784,27 @@ async def test_badge_still_respects_a_muted_channel(tmp_path: Path, repo: Reposi
 
 
 class _FakeSound:
-    """Records each event that the chat service asks to play, and follows the switches."""
+    """Records each event that the chat service asks to play, under the real rules.
 
-    def __init__(self, prefs: Preferences) -> None:
-        """Read the switches from ``prefs``."""
-        from meshterm.services.sound import EVENT_PREFERENCE
+    It is the real sound service with its output replaced, so that the switches of the
+    events and the mention rule are the real ones.
+    """
 
-        self._prefs = prefs
-        self._switch = EVENT_PREFERENCE
+    def __init__(self, ctx) -> None:  # noqa: ANN001 - the test context
+        """Wrap the real service around ``ctx``, with an output that records."""
+        from meshterm.services.sound import SoundService
+
         self.events: list = []
+        self._service = SoundService(ctx, player=SimpleNamespace(play=lambda path: True))
+        self._service._emit = self._record  # type: ignore[method-assign]
 
-    def event_on(self, event) -> bool:  # noqa: ANN001 - a SoundEvent
-        """The switch of the event."""
-        return bool(self._prefs.get(self._switch[event]))
+    def _record(self, event, volume=None) -> bool:  # noqa: ANN001 - a SoundEvent
+        self.events.append(event)
+        return True
 
     def notify(self, event) -> bool:  # noqa: ANN001 - a SoundEvent
-        """Record the event when its switch is on, as the service does."""
-        if self.event_on(event):
-            self.events.append(event)
-        return True
+        """Play the event through the real rules of the service."""
+        return self._service.notify(event)
 
 
 async def _sound_chat(repo: Repository, tmp_path: Path, **prefs: object):
@@ -2815,7 +2818,7 @@ async def _sound_chat(repo: Repository, tmp_path: Path, **prefs: object):
     }
     ctx = _GatedContext(device, repo)
     ctx.preferences = Preferences(values=prefs)
-    ctx.sound = _FakeSound(ctx.preferences)
+    ctx.sound = _FakeSound(ctx)
     chat = ChatService(ctx)
     await chat.start()
     return device, ctx, chat, ctx.sound.events
@@ -2843,13 +2846,27 @@ async def test_sound_each_kind_plays_its_own_event(tmp_path: Path, repo: Reposit
     try:
         await _record(chat, ctx, Message(text="hello", sender="d4e5f6a7"))
         await _record(chat, ctx, Message(text="Ann: hey", channel=0, is_channel=True))
-        text = "Ann: hey @[MockCompanion]"
-        await _record(chat, ctx, Message(text=text, channel=0, is_channel=True))
+        await _record(
+            chat, ctx, Message(text="Ann: @[MockCompanion] look", channel=0, is_channel=True)
+        )
         assert events == [
             SoundEvent.DIRECT_MESSAGE,
             SoundEvent.CHANNEL_MESSAGE,
             SoundEvent.MENTION,
         ]
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_a_mention_in_a_dm_is_a_dm(tmp_path: Path, repo: Repository) -> None:
+    """A DM is already for us, so a mention in it plays the DM sound (JP, 2026-11-21)."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        await _record(chat, ctx, Message(text="@[MockCompanion] hi", sender="d4e5f6a7"))
+        assert events == [SoundEvent.DIRECT_MESSAGE]
     finally:
         await chat.stop()
         await device.disconnect()
@@ -2869,46 +2886,89 @@ async def test_sound_a_switched_off_event_is_silent(tmp_path: Path, repo: Reposi
         await device.disconnect()
 
 
-async def test_sound_a_mention_with_its_switch_off_plays_its_kind(
+async def test_sound_the_open_conversation_plays_by_default(
     tmp_path: Path, repo: Repository
 ) -> None:
-    """With ``sound_mention`` off, a mention plays the sound of its kind instead."""
+    """The conversation on the screen plays, until ``sound_on_screen`` is off."""
     from meshterm.services.sound import SoundEvent
 
-    device, ctx, chat, events = await _sound_chat(repo, tmp_path, sound_mention=False)
-    try:
-        text = "Ann: @[MockCompanion] look"
-        await _record(chat, ctx, Message(text=text, channel=0, is_channel=True))
-        assert events == [SoundEvent.CHANNEL_MESSAGE]
-    finally:
-        await chat.stop()
-        await device.disconnect()
-
-
-async def test_sound_the_open_conversation_is_silent(tmp_path: Path, repo: Repository) -> None:
-    """The conversation on the screen plays nothing, the same as its unread count."""
     device, ctx, chat, events = await _sound_chat(repo, tmp_path)
     try:
         chat.set_active("dm:d4e5f6a7")
         await _record(chat, ctx, Message(text="hello", sender="d4e5f6a7"))
-        assert events == []
+        assert events == [SoundEvent.DIRECT_MESSAGE]
+        ctx.preferences.set("sound_on_screen", False)
+        await _record(chat, ctx, Message(text="again", sender="d4e5f6a7"))
+        assert events == [SoundEvent.DIRECT_MESSAGE]
     finally:
         await chat.stop()
         await device.disconnect()
 
 
-async def test_sound_a_muted_channel_is_silent_also_for_a_mention(
-    tmp_path: Path, repo: Repository
-) -> None:
-    """A mute turns off all notifications of a channel, a mention included (JP, 2026-11-21)."""
+async def test_sound_a_muted_channel_is_silent(tmp_path: Path, repo: Repository) -> None:
+    """A mute turns off the notifications of a channel, and a sound is one."""
     device, ctx, chat, events = await _sound_chat(repo, tmp_path)
     try:
         _mute_public(ctx, tmp_path)
         await _record(chat, ctx, Message(text="Ann: hey", channel=0, is_channel=True))
-        text = "Ann: @[MockCompanion] look"
-        await _record(chat, ctx, Message(text=text, channel=0, is_channel=True))
         assert events == []
         assert chat.unread(_public_key()) == 0
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_an_always_mention_passes_every_rule(tmp_path: Path, repo: Repository) -> None:
+    """``always`` plays on a muted channel, with its kind off, and on screen with that off."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(
+        repo, tmp_path, sound_channel=False, sound_on_screen=False
+    )
+    try:
+        _mute_public(ctx, tmp_path)
+        chat.set_active(_public_key())
+        await _record(
+            chat, ctx, Message(text="Ann: @[MockCompanion] look", channel=0, is_channel=True)
+        )
+        assert events == [SoundEvent.MENTION]
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_an_on_mention_follows_the_rules(tmp_path: Path, repo: Repository) -> None:
+    """``on`` plays the mention sound, but a muted channel stays silent."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path, sound_mention="on")
+    try:
+        await _record(
+            chat, ctx, Message(text="Ann: @[MockCompanion] look", channel=0, is_channel=True)
+        )
+        assert events == [SoundEvent.MENTION]
+        _mute_public(ctx, tmp_path)
+        await _record(
+            chat, ctx, Message(text="Ann: @[MockCompanion] look", channel=0, is_channel=True)
+        )
+        assert events == [SoundEvent.MENTION]
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_a_mention_as_a_message_plays_its_kind(
+    tmp_path: Path, repo: Repository
+) -> None:
+    """``regular`` treats a mention as a channel message, with the rules of one."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path, sound_mention="regular")
+    try:
+        await _record(
+            chat, ctx, Message(text="Ann: @[MockCompanion] look", channel=0, is_channel=True)
+        )
+        assert events == [SoundEvent.CHANNEL_MESSAGE]
     finally:
         await chat.stop()
         await device.disconnect()

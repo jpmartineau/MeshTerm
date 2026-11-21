@@ -96,10 +96,10 @@ TICK_DELAY_S = 0.15
 BATTERY_REARM_PCT = 5
 
 #: The preference that turns each event on or off (JP, 2026-11-21). All are on by default,
-#: except the packet tick.
+#: except the packet tick. The mention has a rule of three values instead
+#: (``sound_mention``), and :meth:`SoundService.event_on` reads it.
 EVENT_PREFERENCE: dict[SoundEvent, str] = {
     SoundEvent.DIRECT_MESSAGE: "sound_dm",
-    SoundEvent.MENTION: "sound_mention",
     SoundEvent.CHANNEL_MESSAGE: "sound_channel",
     SoundEvent.ROOM_POST: "sound_room",
     SoundEvent.BATTERY_LOW: "sound_battery",
@@ -323,7 +323,12 @@ class SoundService:
         return self._prefs.sound_theme != "none"
 
     def event_on(self, event: SoundEvent) -> bool:
-        """Whether the preference of an event turns it on (refer to EVENT_PREFERENCE)."""
+        """Whether the preference of an event turns it on (refer to EVENT_PREFERENCE).
+
+        The mention is on unless its rule treats a mention as a regular message.
+        """
+        if event is SoundEvent.MENTION:
+            return self._prefs.sound_mention != "regular"
         return bool(self._prefs.get(EVENT_PREFERENCE[event]))
 
     def toggle(self) -> bool:

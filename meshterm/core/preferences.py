@@ -180,6 +180,13 @@ _SOUND_THEME_CHOICES: dict[str, str] = {
 #: player failed.
 _FLASH_CHOICES: dict[str, str] = {"off": "off", "on": "on", "silent": "when silent"}
 
+#: How a mention of our node plays (JP, 2026-11-21). ``always`` plays the mention sound
+#: also where the message would make no sound: on a muted channel, with the switch of its
+#: kind off, and in the open conversation. ``on`` plays the mention sound under the same
+#: rules as other messages. ``regular`` treats the mention as a channel message or a room
+#: post. A mention in a DM is never a mention here: it plays the DM sound.
+_MENTION_CHOICES: dict[str, str] = {"always": "always", "on": "on", "regular": "as a message"}
+
 #: The sources of the place of a node (refer to :mod:`meshterm.services.places`). With
 #: ``tiles_nominatim``, the map tiles give the first answer at once, and Nominatim corrects it
 #: later, when MeshTerm is online, because only Nominatim knows the boundaries of a place.
@@ -569,14 +576,16 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_mention",
         label="Mention",
-        help="When a message names you",
+        help="Always: also muted channels",
         question=(
-            "Play the mention sound when a message mentions your node. Off: the message"
-            " plays the sound of its kind"
+            "How a mention of your node plays. Always: the mention sound, also on a muted"
+            " channel. On: the mention sound, under the rules of other messages. As a"
+            " message: the sound of a channel message or a room post"
         ),
         group="Sound",
-        value_type="bool",
-        default=True,
+        value_type="enum",
+        default="always",
+        choices=_MENTION_CHOICES,
         platforms=_SOUND_PLATFORMS,
     ),
     PrefSpec(
@@ -596,6 +605,17 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         question="Play a sound when a room sends a new post",
         group="Sound",
         value_type="bool",
+        default=True,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="sound_on_screen",
+        label="On-screen chat",
+        help="The open conversation too",
+        question="Play sounds for the conversation that is open on the screen",
+        group="Sound",
+        value_type="bool",
+        # On (JP, 2026-11-21): the user can look away from a screen that stays open.
         default=True,
         platforms=_SOUND_PLATFORMS,
     ),
@@ -857,17 +877,6 @@ RETIRED: frozenset[str] = frozenset(
         # and later the weekly flood advert (``weekly_flood_advert``) replaced them.
         "advert_direct_hours",
         "advert_flood_hours",
-        # The first form of the sound preferences, replaced on the day they were made
-        # (2026-11-20): a sound on/off switch that the mute and the "no sound" theme
-        # replaced, and a volume in percent that a slider of ten steps replaced.
-        "sounds",
-        "sound_volume_pct",
-        # The sound of each kind of conversation (never, mentions only, or every message)
-        # and the mention override, replaced on 2026-11-21 by one switch for each event.
-        "dm_sound",
-        "channel_sound",
-        "room_sound",
-        "mention_sound_always",
     }
 )
 
