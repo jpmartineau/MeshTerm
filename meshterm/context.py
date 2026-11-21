@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from .services.places import PlaceService
     from .services.rooms import RoomService
     from .services.site_suggest import SiteSuggester
+    from .services.sound import SoundService
     from .services.watchtower import WatchtowerService
     from .ui.surface import Ui
 
@@ -202,6 +203,7 @@ class AppContext:
     _clock_sync: ClockSync | None = field(default=None, init=False, repr=False)
     _courier: CourierService | None = field(default=None, init=False, repr=False)
     _battery: BatteryService | None = field(default=None, init=False, repr=False)
+    _sound: SoundService | None = field(default=None, init=False, repr=False)
     _places: PlaceService | None = field(default=None, init=False, repr=False)
     _site_suggest: SiteSuggester | None = field(default=None, init=False, repr=False)
     _routes: RouteKeeper | None = field(default=None, init=False, repr=False)
@@ -557,6 +559,20 @@ class AppContext:
 
             self._battery = BatteryService(self)
         return self._battery
+
+    @property
+    def sound(self) -> SoundService:
+        """Return the sound service of the session, and create it at first use.
+
+        It plays the sound of a notification, and it flashes the title bar (refer to
+        :mod:`meshterm.services.sound`). It has no task. It acts only when a caller tells it
+        about an event.
+        """
+        if self._sound is None:
+            from .services.sound import SoundService
+
+            self._sound = SoundService(self)
+        return self._sound
 
     @property
     def devstate(self) -> DeviceState:
