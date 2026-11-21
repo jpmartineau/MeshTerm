@@ -326,11 +326,18 @@ class BatteryService:
             delay = POLL_S
             try:
                 delay = await self._poll()
+                self._tell_sound()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - a bad read must not stop the loop
                 self._ctx.log.debug("battery poller: read failed: %s", exc)
             await asyncio.sleep(delay)
+
+    def _tell_sound(self) -> None:
+        """Give the new reading to the sound service, which plays the battery-low sound."""
+        sound = getattr(self._ctx, "sound", None)
+        if sound is not None and self._reading is not None:
+            sound.note_battery(self._reading.percent, charging=self._reading.charging)
 
     async def _poll(self) -> float:
         """One pass: read the pack, estimate the charge, and calculate the charging trend again.

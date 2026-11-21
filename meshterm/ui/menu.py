@@ -1176,6 +1176,9 @@ async def _resume_monitor(ctx: AppContext) -> Exception | None:
     # reads, and it skips silently without a device, so it is also safe to run from the
     # start.
     await ctx.battery.start()
+    # The packet tick listens to the packets heard. It does nothing while its preference is
+    # off.
+    ctx.sound.start()
     # The place finder reads only stored locations and the network (tiles, Nominatim), never
     # the device. Its first read waits some seconds, so it does not slow the start.
     await ctx.places.start()

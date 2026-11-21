@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -233,3 +235,69 @@ def test_toggle_changes_and_saves_the_preference(tmp_path: Path) -> None:
     assert Preferences.load(tmp_path / "preferences.toml").sound_muted is True
     assert service.toggle() is True  # on again
     assert Preferences.load(tmp_path / "preferences.toml").sound_muted is False
+
+
+def test_the_battery_sound_plays_once_below_the_threshold(tmp_path: Path) -> None:
+    """The sound plays when the level goes below 25%, and not again at the next reading."""
+    service, player, _, _, _ = _service(tmp_path)
+    service.note_battery(30, charging=False)
+    assert player.played == []
+    service.note_battery(24, charging=False)
+    service.note_battery(23, charging=False)
+    assert [p.name.split("-")[1] for p in player.played] == ["LowBattery"]
+
+
+def test_the_battery_sound_rearms_above_the_margin_or_on_charge(tmp_path: Path) -> None:
+    """A level near the threshold does not rearm it. Five points above, or a charge, does."""
+    service, player, _, _, _ = _service(tmp_path)
+    service.note_battery(20, charging=False)
+    service.note_battery(27, charging=False)  # not 5 points above 25: still played once
+    service.note_battery(20, charging=False)
+    assert len(player.played) == 1
+    service.note_battery(30, charging=False)
+    service.note_battery(20, charging=False)
+    assert len(player.played) == 2
+    service.note_battery(20, charging=True)
+    service.note_battery(19, charging=False)
+    assert len(player.played) == 3
+
+
+def test_a_packet_heard_ticks_after_a_short_wait(tmp_path: Path) -> None:
+    """With the tick on, a packet heard plays the tick after TICK_DELAY_S."""
+
+    async def run() -> list[Path]:
+        service, player, _, _, _ = _service(tmp_path, packet_tick=True)
+        service._clock = time.monotonic
+        service._on_packet(None)  # type: ignore[arg-type]
+        service._on_packet(None)  # type: ignore[arg-type] - one tick is already waiting
+        await asyncio.sleep(sound.TICK_DELAY_S + 0.1)
+        return player.played
+
+    played = asyncio.run(run())
+    assert [p.name.split("-")[1] for p in played] == ["Effect_Tick"]
+
+
+def test_a_message_sound_in_the_wait_cancels_the_tick(tmp_path: Path) -> None:
+    """The packet of a message ticks no tick when the message plays its own sound."""
+
+    async def run() -> list[Path]:
+        service, player, _, _, _ = _service(tmp_path, packet_tick=True)
+        service._clock = time.monotonic
+        service._on_packet(None)  # type: ignore[arg-type]
+        service.notify(SoundEvent.DIRECT_MESSAGE)
+        await asyncio.sleep(sound.TICK_DELAY_S + 0.1)
+        return player.played
+
+    played = asyncio.run(run())
+    assert [p.name.split("-")[1] for p in played] == ["Carme"]
+
+
+def test_no_tick_is_scheduled_when_the_tick_is_off(tmp_path: Path) -> None:
+    """With the tick off (the default), a packet heard schedules nothing."""
+
+    async def run() -> bool:
+        service, _, _, _, _ = _service(tmp_path)
+        service._on_packet(None)  # type: ignore[arg-type]
+        return service._tick_pending
+
+    assert asyncio.run(run()) is False

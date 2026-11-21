@@ -32,6 +32,7 @@ notification is silent, and only the flash can show it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -45,6 +46,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..core.events import EventKind, MeshEvent
 from ..platforms import get_platform
 
 if TYPE_CHECKING:
@@ -80,6 +82,18 @@ THEMES: dict[str, dict[SoundEvent, str]] = {
         SoundEvent.PACKET_TICK: "android/Effect_Tick.wav",
     },
 }
+
+#: The seconds between a packet heard and its tick. A received message arrives as a packet
+#: first, then as a message. The wait lets the sound of the message start first, and then
+#: the tick sees that sound and does not play (refer to :data:`TICK_GAP_S`). Thus a message
+#: plays only its own sound (JP, 2026-11-20: "a sound for packets that don't already make
+#: sound").
+TICK_DELAY_S = 0.15
+
+#: How many points above the ``battery_low_pct`` threshold the battery must rise before the
+#: battery-low sound can play again. Without this margin, a reading that moves by one point
+#: around the threshold plays the sound at each poll.
+BATTERY_REARM_PCT = 5
 
 #: The minimum seconds between the start of a sound and a packet tick. It limits the tick
 #: to four each second on a busy mesh, and a tick does not play over the start of another
@@ -237,6 +251,37 @@ class SoundService:
         self._last_sound = float("-inf")
         self._bell: Callable[[], None] | None = None
         self._flash: Callable[[], None] | None = None
+        self._battery_armed = True
+        self._tick_pending = False
+        self._unsubscribe: Callable[[], None] | None = None
+
+    def start(self) -> None:
+        """Listen to the packets heard, for the packet tick. The interactive session calls it."""
+        events = getattr(self._ctx, "events", None)
+        if self._unsubscribe is None and events is not None:
+            self._unsubscribe = events.subscribe(self._on_packet, EventKind.OBSERVATION)
+
+    def stop(self) -> None:
+        """Stop listening to the packets heard."""
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+
+    def _on_packet(self, event: MeshEvent) -> None:
+        """Schedule the tick of a packet heard, if the tick is on (refer to TICK_DELAY_S)."""
+        if self._tick_pending or not self._prefs.packet_tick or not self.enabled:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._tick_pending = True
+        loop.call_later(TICK_DELAY_S, self._tick)
+
+    def _tick(self) -> None:
+        """Play the packet tick, unless another sound started a short time ago."""
+        self._tick_pending = False
+        self.notify(SoundEvent.PACKET_TICK)
 
     def set_hooks(
         self,
@@ -302,6 +347,25 @@ class SoundService:
                 if self._flash is not None:
                     self._flash()
         return audible
+
+    def note_battery(self, percent: int, *, charging: bool) -> None:
+        """Play the battery-low sound one time when the battery goes below the threshold.
+
+        The battery service calls this method after each reading. The sound plays when the
+        level goes below ``battery_low_pct`` while the pack does not charge. It can play
+        again only after the level rises :data:`BATTERY_REARM_PCT` points above the
+        threshold, or the pack charges.
+
+        Args:
+            percent: The level of the battery, from 0 to 100.
+            charging: Whether the pack takes charge now.
+        """
+        threshold = int(self._prefs.battery_low_pct)
+        if charging or percent >= threshold + BATTERY_REARM_PCT:
+            self._battery_armed = True
+        elif percent < threshold and self._battery_armed:
+            self._battery_armed = False
+            self.notify(SoundEvent.BATTERY_LOW)
 
     def preview(
         self, event: SoundEvent = SoundEvent.CHANNEL_MESSAGE, volume: int | None = None
