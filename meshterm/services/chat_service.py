@@ -382,10 +382,10 @@ class ChatService:
                     await self.channel_id_for(message.channel) if message.is_channel else None
                 )
                 listed = await self._is_listed(message, channel_id)
-                notify = listed and not self._is_muted(message, channel_id)
-                chat = self._store_inbound(run_id, message, channel_id, notify=notify)
+                muted = self._is_muted(message, channel_id)
+                chat = self._store_inbound(run_id, message, channel_id, notify=listed and not muted)
                 if listed:
-                    await self._play_sound(message, chat.key)
+                    await self._play_sound(message, chat.key, muted=muted)
             except Exception as exc:  # noqa: BLE001 - one bad message must not stop the worker
                 self._ctx.log.debug("chat: failed to record message: %s", exc)
             finally:
@@ -481,21 +481,25 @@ class ChatService:
             return await self._is_listed_channel(channel_id)
         return await self._is_listed_contact(message.sender, post=message.is_post)
 
-    async def _play_sound(self, message: Message, key: str) -> None:
+    async def _play_sound(self, message: Message, key: str, *, muted: bool = False) -> None:
         """Play the sound of a received message, if its conversation wants one.
 
-        The rule (JP, 2026-11-20):
+        The rule (JP, 2026-11-21):
 
         * The open conversation makes no sound, the same as its unread count: the user
           already sees the message.
-        * Each conversation has a sound setting (refer to
-          :class:`~meshterm.core.sound_store.SoundStore`), or follows the default of its
-          kind (the ``channel_sound``, ``dm_sound``, and ``room_sound`` preferences).
-        * ``off`` plays nothing. Otherwise a mention of our node plays the mention sound.
-          ``all`` plays the sound of the kind for each other message, and ``mentions``
-          plays nothing for it.
+        * With ``mention_sound_always`` on (the default), a mention of our node always plays
+          the mention sound, also on a muted channel and in a conversation set to ``off``.
+        * A muted channel (``muted``, refer to MuteStore) plays nothing else. A mute turns
+          off the notifications of the channel, and a sound is one.
+        * A channel follows the ``channel_sound`` preference. Channels have no setting of
+          their own. A DM and a room have their own setting (refer to
+          :class:`~meshterm.core.sound_store.SoundStore`), or follow ``dm_sound`` and
+          ``room_sound``.
+        * ``off`` plays nothing. Otherwise a mention plays the mention sound. ``all`` plays
+          the sound of the kind for each other message, and ``mentions`` plays nothing for
+          it.
 
-        The channel mute is not part of this rule. It stops the unread count, not the sound.
         A failure here must never stop the recording of messages, so it only goes to the log.
         """
         if key == self._active:
@@ -504,27 +508,35 @@ class ChatService:
         if sound is None:
             return
         try:
-            event = await self._sound_event(message, key)
+            event = await self._sound_event(message, key, muted=muted)
             if event is not None:
                 sound.notify(event)
         except Exception as exc:  # noqa: BLE001 - a sound must never stop the recorder
             self._ctx.log.debug("chat: sound failed: %s", exc)
 
-    async def _sound_event(self, message: Message, key: str) -> SoundEvent | None:
+    async def _sound_event(
+        self, message: Message, key: str, *, muted: bool = False
+    ) -> SoundEvent | None:
         """The sound event of a received message, or ``None`` for no sound."""
+        prefs = self._ctx.preferences
+        mention = await self._mentions_us(message.text)
+        if mention and prefs.mention_sound_always:
+            return SoundEvent.MENTION
         if message.is_channel:
-            kind, event = "channel_sound", SoundEvent.CHANNEL_MESSAGE
-        elif message.is_post:
-            kind, event = "room_sound", SoundEvent.ROOM_POST
+            if muted:
+                return None
+            when, event = prefs.channel_sound, SoundEvent.CHANNEL_MESSAGE
         else:
-            kind, event = "dm_sound", SoundEvent.DIRECT_MESSAGE
-        store = getattr(self._ctx, "sound_store", None)
-        when = (store.get(key) if store is not None else None) or getattr(
-            self._ctx.preferences, kind
-        )
+            kind, event = (
+                ("room_sound", SoundEvent.ROOM_POST)
+                if message.is_post
+                else ("dm_sound", SoundEvent.DIRECT_MESSAGE)
+            )
+            store = getattr(self._ctx, "sound_store", None)
+            when = (store.get(key) if store is not None else None) or getattr(prefs, kind)
         if when == "off":
             return None
-        if await self._mentions_us(message.text):
+        if mention:
             return SoundEvent.MENTION
         return event if when == "all" else None
 

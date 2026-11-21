@@ -39,24 +39,24 @@ def _ctx(tmp_path: Path, answer: object = None, **prefs: object) -> SimpleNamesp
 def test_the_description_names_the_default_or_the_own_setting(tmp_path: Path) -> None:
     """With no setting, the row names the default of the kind. With one, it names it."""
     ctx = _ctx(tmp_path)
-    assert conversation_sound.describe(ctx, "chan:a", "channel") == "Default: mentions only"
+    assert conversation_sound.describe(ctx, "dm:a", "room") == "Default: mentions only"
     assert conversation_sound.describe(ctx, "dm:b", "dm") == "Default: every message"
-    ctx.sound_store.set("chan:a", "off")
-    assert conversation_sound.describe(ctx, "chan:a", "channel") == "No sound"
+    ctx.sound_store.set("dm:a", "off")
+    assert conversation_sound.describe(ctx, "dm:a", "room") == "No sound"
 
 
 def test_the_picker_stores_a_setting_and_default_removes_it(tmp_path: Path) -> None:
     """A pick stores the setting. ``Default`` removes it again."""
     ctx = _ctx(tmp_path, answer="all")
-    assert asyncio.run(conversation_sound.pick_sound(ctx, "chan:a", "channel", "Public"))
-    assert ctx.sound_store.get("chan:a") == "all"
+    assert asyncio.run(conversation_sound.pick_sound(ctx, "dm:a", "room", "Board"))
+    assert ctx.sound_store.get("dm:a") == "all"
     title, items, default = ctx.ui.asked[0]
-    assert title == "Sound — Public"
+    assert title == "Sound — Board"
     assert default == "default"
     assert [i.value for i in items] == ["default", "off", "mentions", "all"]
     ctx.ui.answer = "default"
-    assert asyncio.run(conversation_sound.pick_sound(ctx, "chan:a", "channel", "Public"))
-    assert ctx.sound_store.get("chan:a") is None
+    assert asyncio.run(conversation_sound.pick_sound(ctx, "dm:a", "room", "Board"))
+    assert ctx.sound_store.get("dm:a") is None
 
 
 def test_esc_or_the_same_value_changes_nothing(tmp_path: Path) -> None:

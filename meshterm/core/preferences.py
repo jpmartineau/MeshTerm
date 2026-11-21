@@ -575,13 +575,28 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="channel_sound",
         label="Channel sound",
-        help="Unless set per channel",
-        question="When a channel plays a sound, unless the channel has its own setting",
+        help="For channels not muted",
+        question="When a channel plays a sound. A muted channel plays none",
         group="Sound",
         value_type="enum",
         # Mentions: a public channel can carry many messages each hour.
         default="mentions",
         choices=SOUND_WHEN_CHOICES,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="mention_sound_always",
+        label="Mentions always",
+        help="Even if muted or never",
+        question=(
+            "Play the mention sound for each mention of your node, also on a muted channel"
+            " and in a conversation set to never"
+        ),
+        group="Sound",
+        value_type="bool",
+        # On: a mention is the message that the user most wants to hear (JP, 2026-11-21:
+        # "a global always play sound for mentions"). The ^S mute still silences it.
+        default=True,
         platforms=_SOUND_PLATFORMS,
     ),
     PrefSpec(

@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """The *Sound…* row of a conversation, and the picker that it opens.
 
-A channel, a DM, and a room each have a sound setting (refer to
+A DM and a room each have a sound setting (refer to
 :class:`~meshterm.core.sound_store.SoundStore`): ``off``, ``mentions``, ``all``, or the
-default of its kind (a preference). Three pages show the row: the channel detail page,
-the node page of a contact, and the page of a room. They all build it here, so that the
-words and the picker are the same on each page.
+default of its kind (a preference). Two pages show the row: the node page of a contact,
+and the page of a room. They both build it here, so that the words and the picker are the
+same on each page.
+
+A channel has no sound setting of its own (JP, 2026-11-21). All channels follow the
+``channel_sound`` preference, and the mute of a channel makes it silent.
 
 The row is only on a platform that can play a sound. The PicoCalc has no sound, so a
 setting there would change nothing that the user can hear.
@@ -35,7 +38,7 @@ SOUND_ROW = "sound"
 _DEFAULT = "default"
 
 #: The preference that holds the default of each kind of conversation.
-KIND_PREFERENCE = {"channel": "channel_sound", "dm": "dm_sound", "room": "room_sound"}
+KIND_PREFERENCE = {"dm": "dm_sound", "room": "room_sound"}
 
 
 def offered(ctx: AppContext) -> bool:
@@ -55,7 +58,7 @@ def describe(ctx: AppContext, key: str, kind: str) -> str:
     Args:
         ctx: The shared application context.
         key: The key of the conversation (``chan:…`` or ``dm:…``).
-        kind: ``channel``, ``dm``, or ``room``.
+        kind: ``dm`` or ``room``.
 
     Returns:
         A short sentence, for example ``Default: mentions only``.
@@ -81,7 +84,7 @@ async def pick_sound(ctx: AppContext, key: str, kind: str, subject: str) -> bool
     Args:
         ctx: The shared application context.
         key: The key of the conversation.
-        kind: ``channel``, ``dm``, or ``room``.
+        kind: ``dm`` or ``room``.
         subject: The name of the conversation, for the title.
 
     Returns:
@@ -98,7 +101,7 @@ async def pick_sound(ctx: AppContext, key: str, kind: str, subject: str) -> bool
     choice = await ctx.ui.select(
         f"Sound — {subject}",
         items,
-        prompt=f"When this {'conversation' if kind == 'dm' else kind} plays a sound:",
+        prompt=f"When this {'conversation' if kind == 'dm' else 'room'} plays a sound:",
         default=current,
     )
     if choice is None or choice == current:

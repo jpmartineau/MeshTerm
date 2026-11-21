@@ -90,9 +90,7 @@ from ..core.regions import RegionNameError
 from ..core.regions import validate as validate_region
 from ..persistence.repository import ACTIVITY_DRAWN_BUCKETS
 from ..platforms import get_platform
-from . import conversation_sound
 from .braillechart import activity_peak, activity_sparkline
-from .conversation_sound import SOUND_ICON, SOUND_ROW, sound_row
 from .menus import (
     Lane,
     column_header,
@@ -903,7 +901,7 @@ def _detail_items(ctx: AppContext, slot: ChannelSlot) -> list:
     # ✎ and 🗑 are one cell, and 📱 🔑 💬 🔔 🔕 are two cells. Thus the code measures the
     # column one time and pads each mark to it. If not, the edit row and the clear row start
     # their labels one column to the left of the rows above them.
-    lane = icon_lane(("📱", "🔑", "💬", "🔔", "🔕", SOUND_ICON, "🔖", "✎", "🗑"))
+    lane = icon_lane(("📱", "🔑", "💬", "🔔", "🔕", "🔖", "✎", "🗑"))
     chat_label = marked_label("💬", "Open in chat", "", lane=lane)
     if unread:
         chat_label.append("  ●", style="err")
@@ -934,11 +932,6 @@ def _detail_items(ctx: AppContext, slot: ChannelSlot) -> list:
             ),
             (chat_label, "Read and send messages on this channel", _CHAT),
             mute_row,
-            *(
-                [sound_row(ctx, slot.conversation.key, "channel", lane)]
-                if conversation_sound.offered(ctx)
-                else []
-            ),
             _scope_row(ctx, slot, lane),
             (
                 marked_label("✎", "Rename / change key…", "", lane=lane),
@@ -1010,9 +1003,6 @@ async def _channel_detail(
             # place and go back to the detail screen (its rows render again to the new
             # state). Do not count it as a channel change.
             _toggle_mute(ctx, slot)
-        elif choice == SOUND_ROW:
-            # MeshTerm keeps it, as it keeps the mute. It is not a channel change.
-            await conversation_sound.pick_sound(ctx, slot.conversation.key, "channel", slot.name)
         elif choice == _SCOPE:
             # MeshTerm keeps it, as it keeps the mute. Nothing is written to the radio until
             # a message is sent, so it is not a channel change either.

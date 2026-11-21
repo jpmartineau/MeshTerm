@@ -85,19 +85,24 @@ MeshTerm plays a sound when something arrives that you want to know about now:
 | --- | --- |
 | Direct message | A DM arrives |
 | Mention | A message in any conversation mentions your node (`@[Your name]`) |
-| Channel message | A message arrives on a channel whose sound is **every message** |
+| Channel message | A message arrives on a channel that is not muted, when **Channel sound** is **every message** |
 | Room post | A post arrives in a room whose sound is **every message** |
 | Battery low | The battery goes below 25% (the **Battery low** preference). It plays one time, and again only after the battery is 5 points higher or charges |
 | Packet tick | A very short tick for each packet heard that plays no other sound. It is off until you turn on **Packet tick**, and it plays at most four times each second |
 
 The conversation that is open on the screen makes no sound, because you already see it.
 
-Each channel, DM, and room has a **Sound** row: on the channel page, on the node page of
-the contact, and on the room page. Select **never**, **mentions only**, **every message**, or
-**Default**. Default follows the preference for that kind of conversation: every message
-for a DM, and mentions only for a channel or a room. The mute of a channel (🔕) is a different
-setting. It removes the channel from the unread count, but a mention in it still plays a
-sound.
+All channels follow one preference, **Channel sound**: **never**, **mentions only** (the
+default), or **every message**. A channel that you muted (🔕) is silent, because the mute
+turns off all of its notifications.
+
+Each DM and room has a **Sound** row: on the node page of the contact, and on the room page.
+Select **never**, **mentions only**, **every message**, or **Default**. Default follows the
+preference for that kind of conversation: every message for a DM, and mentions only for a
+room.
+
+**Mentions always** (on by default) plays the mention sound for each mention of your node,
+also on a muted channel and in a DM or a room set to **never**.
 
 **Ctrl+S** mutes or unmutes the sounds from any screen. The header shows 🔊 while the
 sounds play and 🔇 while they are muted. The **Sound** row above Quit in the main menu
