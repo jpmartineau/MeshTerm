@@ -39,8 +39,8 @@ def _ctx(tmp_path: Path, answer: object = None, **prefs: object) -> SimpleNamesp
 def test_the_description_names_the_default_or_the_own_setting(tmp_path: Path) -> None:
     """With no setting, the row names the default of the kind. With one, it names it."""
     ctx = _ctx(tmp_path)
-    assert conversation_sound.describe(ctx, "chan:a", "channel") == "Default: mentions"
-    assert conversation_sound.describe(ctx, "dm:b", "dm") == "Default: all messages"
+    assert conversation_sound.describe(ctx, "chan:a", "channel") == "Default: mentions only"
+    assert conversation_sound.describe(ctx, "dm:b", "dm") == "Default: every message"
     ctx.sound_store.set("chan:a", "off")
     assert conversation_sound.describe(ctx, "chan:a", "channel") == "No sound"
 

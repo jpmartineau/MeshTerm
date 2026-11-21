@@ -85,17 +85,17 @@ MeshTerm plays a sound when something arrives that you want to know about now:
 | --- | --- |
 | Direct message | A DM arrives |
 | Mention | A message in any conversation mentions your node (`@[Your name]`) |
-| Channel message | A message arrives on a channel that you set to **All** |
-| Room post | A post arrives in a room that you set to **All** |
+| Channel message | A message arrives on a channel whose sound is **every message** |
+| Room post | A post arrives in a room whose sound is **every message** |
 | Battery low | The battery goes below 25% (the **Battery low** preference). It plays one time, and again only after the battery is 5 points higher or charges |
 | Packet tick | A very short tick for each packet heard that plays no other sound. It is off until you turn on **Packet tick**, and it plays at most four times each second |
 
 The conversation that is open on the screen makes no sound, because you already see it.
 
 Each channel, DM, and room has a **Sound** row: on the channel page, on the node page of
-the contact, and on the room page. Select **Off**, **Mentions**, **All messages**, or
-**Default**. Default follows the preference for that kind of conversation: all messages
-for a DM, and mentions for a channel or a room. The mute of a channel (🔕) is a different
+the contact, and on the room page. Select **never**, **mentions only**, **every message**, or
+**Default**. Default follows the preference for that kind of conversation: every message
+for a DM, and mentions only for a channel or a room. The mute of a channel (🔕) is a different
 setting. It removes the channel from the unread count, but a mention in it still plays a
 sound.
 

@@ -471,7 +471,7 @@ async def _prompt_value(ctx: AppContext, spec: PrefSpec, current: Any) -> Any:
         # A choice between two states is clearest as a pair of buttons. The current state
         # is highlighted, so that Enter does not change anything by accident.
         return await ctx.ui.dialog(
-            spec.description,
+            (spec.question or spec.description),
             [("Off", False), ("On", True)],
             title=spec.label,
             default=1 if current else 0,
@@ -487,7 +487,7 @@ async def _prompt_value(ctx: AppContext, spec: PrefSpec, current: Any) -> Any:
             for value, label in spec.choices.items()
         ]
         return await ctx.ui.select(
-            spec.label, items, prompt=f"{spec.description}:", default=current
+            spec.label, items, prompt=f"{(spec.question or spec.description)}:", default=current
         )
 
     if spec.key == "sound_volume":
@@ -496,7 +496,7 @@ async def _prompt_value(ctx: AppContext, spec: PrefSpec, current: Any) -> Any:
         result = await ctx.ui.session.run_screen(
             SliderScreen(
                 spec.label,
-                spec.help,
+                spec.question or spec.help,
                 int(current),
                 int(spec.minimum or 1),
                 int(spec.maximum or 10),
@@ -516,7 +516,7 @@ async def _prompt_value(ctx: AppContext, spec: PrefSpec, current: Any) -> Any:
 
     raw = await ctx.ui.text(
         spec.label,
-        prompt=f"{spec.description}:",
+        prompt=f"{(spec.question or spec.description)}:",
         default="" if current is None else str(current),
         validate=validate,
         help_text=range_hint(spec),

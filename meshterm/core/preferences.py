@@ -110,6 +110,9 @@ class PrefSpec:
         relaunch: Whether the new value applies only at the next start. It is part of
             the description, instead of a mark of its own, because it is a caveat about
             one preference. It is not a status that the user looks for in a column.
+        question: The question of the dialog that edits the value, when the short help of
+            the row does not read as one ("When a DM plays a sound"). ``""`` (the default)
+            asks with the help.
         platforms: The :class:`~meshterm.platforms.Platform` names on which the page
             offers the preference, or ``None`` (the default) for all of them. Some
             preferences are about hardware that only one flavour has (the console font
@@ -133,6 +136,7 @@ class PrefSpec:
     unit: str = ""
     relaunch: bool = False
     platforms: frozenset[str] | None = None
+    question: str = ""
 
     @property
     def description(self) -> str:
@@ -178,7 +182,11 @@ _FLASH_CHOICES: dict[str, str] = {"off": "off", "on": "on", "silent": "when sile
 
 #: When a conversation plays its sound. A mention of our node always plays the mention
 #: sound, unless the conversation is ``off``.
-SOUND_WHEN_CHOICES: dict[str, str] = {"off": "off", "mentions": "mentions", "all": "all messages"}
+SOUND_WHEN_CHOICES: dict[str, str] = {
+    "off": "never",
+    "mentions": "mentions only",
+    "all": "every message",
+}
 
 #: The sources of the place of a node (refer to :mod:`meshterm.services.places`). With
 #: ``tiles_nominatim``, the map tiles give the first answer at once, and Nominatim corrects it
@@ -505,7 +513,7 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_theme",
         label="Sound theme",
-        help="The set of sounds that notifications play",
+        help="Which sounds play",
         group="Sound",
         value_type="enum",
         # Android, and not muted (JP, 2026-11-20). "No sound" is a theme, not a mute: the
@@ -517,7 +525,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_muted",
         label="Mute",
-        help="Mute the sounds for now. ^S mutes or unmutes on any screen",
+        help="^S mutes on any screen",
+        question="Mute the sounds? ^S also mutes or unmutes them on any screen",
         group="Sound",
         value_type="bool",
         # A mute is for now, and the theme is for always. ^S changes this preference from
@@ -528,7 +537,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="sound_volume",
         label="Volume",
-        help="How loud the sounds play: 1 is 10%, 10 is 100%",
+        help="1 is 10%, 10 is 100%",
+        question="How loud the sounds play: 1 is 10%, 10 is 100%",
         group="Sound",
         value_type="int",
         # A slider of ten steps (JP, 2026-11-20). MeshTerm scales the samples itself,
@@ -542,7 +552,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="notify_flash",
         label="Flash",
-        help="Flash the title bar for a notification",
+        help="Flash the title instead",
+        question="When the title flashes for a notification",
         group="Sound",
         value_type="enum",
         # When silent: the flash replaces a sound that does not play, and it does not add to
@@ -553,7 +564,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="dm_sound",
         label="DM sound",
-        help="When a DM plays a sound, if its own Sound is Default",
+        help="Unless set per DM",
+        question="When a DM plays a sound, unless the DM has its own setting",
         group="Sound",
         value_type="enum",
         default="all",
@@ -563,7 +575,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="channel_sound",
         label="Channel sound",
-        help="When a channel plays a sound, if its own Sound is Default",
+        help="Unless set per channel",
+        question="When a channel plays a sound, unless the channel has its own setting",
         group="Sound",
         value_type="enum",
         # Mentions: a public channel can carry many messages each hour.
@@ -574,7 +587,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="room_sound",
         label="Room sound",
-        help="When a room plays a sound, if its own Sound is Default",
+        help="Unless set per room",
+        question="When a room plays a sound, unless the room has its own setting",
         group="Sound",
         value_type="enum",
         default="mentions",
@@ -584,7 +598,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="packet_tick",
         label="Packet tick",
-        help="A short tick for each packet heard that plays no other sound",
+        help="A tick for other packets",
+        question="A short tick for each packet heard that plays no other sound",
         group="Sound",
         value_type="bool",
         # Off: a busy mesh can send many packets each minute. The service plays at most one
@@ -595,7 +610,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
     PrefSpec(
         key="battery_low_pct",
         label="Battery low",
-        help="Play the battery sound when the battery goes below this level",
+        help="Plays the battery sound",
+        question="Play the battery sound when the battery goes below this level",
         group="Sound",
         value_type="int",
         # 25: the level where the gauge of the header changes to its low band (batt.low).
