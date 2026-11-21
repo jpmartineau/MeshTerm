@@ -68,7 +68,7 @@ from meshterm.platforms import (
     set_platform,
 )
 from meshterm.services.courier import CourierService
-from meshterm.services.heard_by import BEYOND, NEARBY, UNHEARD, WAITING, HeardBy
+from meshterm.services.heard_by import HEARD, UNHEARD, WAITING, HeardBy
 from meshterm.services.message_paths import Arrival
 from meshterm.services.monitor_service import ACTIVITY_BUCKETS
 from meshterm.services.records import CATEGORY_BY_ID
@@ -826,37 +826,27 @@ class _GalleryHeard:
 
 
 def _chat_heard(cols: int, rows: int) -> Screen:
-    """Our channel messages with the four relay marks, and the note of the picked one.
+    """Our channel messages with the three relay marks, and the note of the picked one.
 
-    The marks are the spinner, ``⚠`` (only the near relays sent it back), ``✗`` (no copy),
-    and ``✓ 3`` (three relays past the near relays). The newest message is picked, so its
-    note names the relays and the near relay that carried it out. The names are long, so
-    the note wraps under the body on the PicoCalc.
+    The marks are ``✗`` (no repeater sent a copy back), the spinner, and ``✓ 3`` (three
+    relays sent a copy back). The newest message is picked, so its note names the relays.
+    The names are long, so the note wraps under the body on the PicoCalc.
     """
     conv = Conversation(label="Lakeside", is_channel=True, channel_idx=1)
     messages = [
         ChatMessage(text="Alice: anyone on the ridge tonight?", is_channel=True),
-        ChatMessage(text="testing the new antenna", outbound=True, is_channel=True, row_id=1),
-        ChatMessage(text="anyone hear this?", outbound=True, is_channel=True, row_id=2),
-        ChatMessage(text="one more try", outbound=True, is_channel=True, row_id=3),
-        ChatMessage(text="heading up the ridge now", outbound=True, is_channel=True, row_id=4),
+        ChatMessage(text="anyone hear this?", outbound=True, is_channel=True, row_id=1),
+        ChatMessage(text="one more try", outbound=True, is_channel=True, row_id=2),
+        ChatMessage(text="heading up the ridge now", outbound=True, is_channel=True, row_id=3),
     ]
     heard = _GalleryHeard(
         {
-            "testing the new antenna": HeardBy(UNHEARD),
-            "anyone hear this?": HeardBy(NEARBY, copies=2),
+            "anyone hear this?": HeardBy(UNHEARD),
             "one more try": HeardBy(WAITING),
-            "heading up the ridge now": HeardBy(
-                BEYOND, beyond=("a1", "b2", "c3"), via=("3d",), copies=4
-            ),
+            "heading up the ridge now": HeardBy(HEARD, relays=("a1", "b2", "c3"), copies=3),
         }
     )
-    names = {
-        "a1": "Lakeside-North-Shore",
-        "b2": "Marina-Tower",
-        "c3": "Ridge-Top-Solar",
-        "3d": "Home-Yagi",
-    }
+    names = {"a1": "Lakeside-North-Shore", "b2": "Marina-Tower", "c3": "Ridge-Top-Solar"}
     screen = ChatScreen(
         conv,
         messages,

@@ -40,7 +40,7 @@ from ..core.models import (
 )
 from ..core.regions import WILDCARD
 from ..platforms import Platform, on_platform
-from ..services.heard_by import BEYOND, NEARBY, UNHEARD, WAITING, HeardBy, HeardTracker
+from ..services.heard_by import HEARD, UNHEARD, WAITING, HeardBy, HeardTracker
 from . import pixelart
 from .compose import MentionEditor
 from .pathline import PATH_INK, PathHop
@@ -88,9 +88,6 @@ _CORRECTED = ("?", "warn")
 #: animated spinner instead (refer to :meth:`ChatScreen._delivery_glyph`).
 _DELIVERED = ("✓", "ok")
 _FAILED = ("✗", "err")
-#: The mark of our channel message that only the near relays sent back: it left our radio,
-#: and nothing proves that it went farther (refer to :mod:`~meshterm.services.heard_by`).
-_NEAR_ONLY = ("⚠", "warn")
 #: The time that the chat waits after a channel packet before it looks for copies of our
 #: messages in the packet log. The recorder stores each packet in the background.
 _HEARD_SETTLE_S = 1.0
@@ -337,8 +334,8 @@ class ChatScreen(Screen):
             resend_flood: Like ``resend``, but it first forgets the route that the device
                 learned to the contact, so that the retry floods (direct chats only).
                 With ``None``, ^R always retries on the route, as it did before.
-            heard: The verdicts on our own channel messages: whether a relay that is not a
-                near relay sent a copy back (refer to :mod:`~meshterm.services.heard_by`).
+            heard: The verdicts on our own channel messages: whether a repeater sent a copy
+                back (refer to :mod:`~meshterm.services.heard_by`).
                 With ``None`` (a direct chat, or a channel with no key), our channel
                 messages show no mark.
             hop_name: Gives the name of a relay from its hash, for the note under a
@@ -1132,42 +1129,33 @@ class ChatScreen(Screen):
         heard = self._heard(message)
         return (
             message.acked,
-            None if heard is None else (heard.state, heard.beyond, heard.via),
+            None if heard is None else (heard.state, heard.relays),
         )
 
     def _heard_mark(self, heard: HeardBy) -> Text:
         """The mark at the end of our channel message: the marks of a direct message.
 
-        The spinner turns while no relay that is not near sent a copy back, until the
-        ``heard_wait_s`` wait is over. Then ``✓`` and the number of these relays, ``⚠`` for
-        a message that only the near relays sent back, or ``✗`` for no copy at all.
+        The spinner turns while no repeater sent a copy back, until the ``heard_wait_s``
+        wait is over. Then ``✓`` and the number of the relays, or ``✗`` for no copy at all.
         """
         if heard.state == WAITING:
             return self._spinner.text()
-        if heard.state == BEYOND:
+        if heard.state == HEARD:
             glyph, style = _DELIVERED
-            return Text(f"{glyph} {len(heard.beyond)}", style=style)
-        if heard.state == NEARBY:
-            return Text(_NEAR_ONLY[0], style=_NEAR_ONLY[1])
+            return Text(f"{glyph} {len(heard.relays)}", style=style)
         glyph, style = _FAILED
         return Text(glyph, style=style)
 
     def _heard_note(self, heard: HeardBy) -> Text | None:
         """The line under a selected channel message of ours: which relays heard it."""
         note = Text()
-        if heard.state == BEYOND:
-            names = ", ".join(self._hop_name(hop) for hop in heard.beyond)
+        if heard.state == HEARD:
+            names = ", ".join(self._hop_name(hop) for hop in heard.relays)
             note.append(f"{_DELIVERED[0]} ", style=_DELIVERED[1])
-            note.append(f"heard by {names}", style="muted")
-            if heard.via:
-                via = ", ".join(self._hop_name(hop) for hop in heard.via)
-                note.append(f" · via {via}", style="muted")
-        elif heard.state == NEARBY:
-            note.append(f"{_NEAR_ONLY[0]} ", style=_NEAR_ONLY[1])
-            note.append("only your near relays sent it back", style="muted")
+            note.append(f"relayed by {names}", style="muted")
         elif heard.state == UNHEARD:
             note.append(f"{_FAILED[0]} ", style=_FAILED[1])
-            note.append("no relay sent it back", style="muted")
+            note.append("no repeater sent it back", style="muted")
         else:
             return None
         return note
@@ -2227,36 +2215,12 @@ async def _make_heard_tracker(
     from ..services.heard_by import make_tracker
 
     secret = await _channel_secret(conversation, device)
-    tracker = await make_tracker(ctx, channel_name=conversation.label, secret=secret)
+    tracker = make_tracker(ctx, channel_name=conversation.label, secret=secret)
     if tracker is None:
         return None, None
     stored_names, _named_at = ctx.repo.node_names_with_times()
     resolve = trace_runner.make_node_resolver(contacts, stored_names)
     return tracker, lambda hop: resolve(hop) or hop
-
-
-async def _past_near_atom(ctx: AppContext, message: ChatMessage, arrivals: list) -> str:
-    """The atom of the paths dialog that counts the relays past our near relays.
-
-    The near relays are the ones kept with the send, or the ones that apply now for a
-    message sent before MeshTerm kept them (refer to :mod:`~meshterm.services.heard_by`).
-    """
-    from ..services.heard_by import judge, near_relays, relay_paths
-    from ..services.outbound import current_choice
-
-    near: tuple[str, ...] | None = None
-    if message.row_id is not None:
-        near, _paths = ctx.repo.heard_records([message.row_id]).get(message.row_id, (None, None))
-    if near is None and getattr(ctx, "outbound_store", None) is not None:
-        try:
-            near = near_relays((await current_choice(ctx)).paths)
-        except Exception:  # noqa: BLE001 - with no outbound paths, each relay counts
-            near = None
-    heard = judge(relay_paths(arrivals), near or (), age_s=float("inf"), wait_s=0.0)
-    count = len(heard.beyond)
-    if not near:
-        return f" · {count} relay{'s' if count != 1 else ''}"
-    return f" · {count} past your near relay{'s' if len(near) != 1 else ''}"
 
 
 async def _with_restore(ctx: AppContext, attempt: Callable[[], Awaitable[Any]]) -> Any:
@@ -2552,8 +2516,6 @@ async def _make_paths_presenter(
                 if arrivals
                 else "no copies in the packet log"
             )
-            if arrivals and message.outbound:
-                summary += await _past_near_atom(ctx, message, arrivals)
         elif conversation.is_channel:
             await session.scroll(
                 Text(

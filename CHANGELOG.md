@@ -11,22 +11,15 @@ can change how things behave. It does not only add new things.
 
 ### Added
 
-- **A channel message that you send shows whether it went past your own repeaters.** A
-  channel has no acknowledgement, but your radio hears each repeater that relays your
-  message, and each copy names the relays that it went through. The end of your message
-  shows a spinner, then `✓` and the number of relays that heard it past your **near
-  relays**. Your near relays are the first hops of the outbound paths of your active site.
-  At home, a relay by the repeater next to you proves only that the message left your
-  radio. `⚠` means that only your near relays sent it back, and `✗` means that no relay
-  sent it back. A copy that comes late changes the mark. Select the message to see the
-  names of the relays, and which of your near relays carried it out. The wait is the new
-  *Relay wait* preference (`heard_wait_s`, 30 s). With no outbound paths, each relay
-  counts. MeshTerm sees only the relays that your radio hears, and only while it is
-  connected. `meshterm chat history --channel` shows the same verdict in a `HEARD` column,
-  and `--json` gives `heard`, `heard_by`, and `heard_via` (#38).
-- **^P on your own channel message counts the relays past your near relays.** The line
-  under the quote of the message adds `3 past your near relays` to the copies and paths
-  that it already counted.
+- **A channel message that you send shows whether a repeater relayed it.** A channel has
+  no acknowledgement, but your radio hears each repeater that relays your message. The
+  end of your message shows a spinner, then `✓` and the number of repeaters that sent a
+  copy back, or `✗` when none did. A copy that comes late changes the mark, the same as a
+  late acknowledgement of a direct message. Select the message to see the names of the
+  repeaters. The wait is the new *Relay wait* preference (`heard_wait_s`, 30 s). MeshTerm
+  sees only the repeaters that your radio hears, and only while it is connected.
+  `meshterm chat history --channel` shows the same count in a `HEARD` column, and
+  `--json` gives `heard` and `heard_by` (#38).
 
 ### Fixed
 

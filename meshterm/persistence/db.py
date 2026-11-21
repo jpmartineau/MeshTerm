@@ -189,15 +189,12 @@ CREATE TABLE IF NOT EXISTS node_places (
     found_at  TEXT NOT NULL       -- UTC ISO-8601
 );
 
--- Our own channel messages: whether a relay that is not one of our near relays heard them
--- (refer to meshterm.services.heard_by). near_hops is a JSON list of the near relays at the
--- time of the send. paths is a JSON list of the relay paths of the copies that came back,
--- written one time when the message is out of the match window of the packet log. NULL:
--- not settled yet.
+-- Our own channel messages: the relays that sent a copy back (refer to
+-- meshterm.services.heard_by). paths is a JSON list of the relay paths of the copies,
+-- written one time when the message is out of the match window of the packet log.
 CREATE TABLE IF NOT EXISTS heard_relays (
     message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    near_hops  TEXT,
-    paths      TEXT
+    paths      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_run ON traces(run_id);
@@ -455,6 +452,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_observations_sent ON observations(node, observed_at) "
         "WHERE sent_at IS NOT NULL"
     )
+
+    heard_cols = {row["name"] for row in conn.execute("PRAGMA table_info(heard_relays)")}
+    if "near_hops" in heard_cols:
+        # The first build of schema 24 kept the near relays of each send. They are gone
+        # (refer to meshterm.services.heard_by), and the table holds only derived data,
+        # so it is made again. The chat fills it again from the packet log.
+        conn.execute("DROP TABLE heard_relays")
+        conn.execute(
+            "CREATE TABLE heard_relays (message_id INTEGER PRIMARY KEY "
+            "REFERENCES messages(id) ON DELETE CASCADE, paths TEXT NOT NULL)"
+        )
 
     stored = conn.execute("SELECT value FROM schema_meta WHERE key = 'version'").fetchone()
     if stored is not None and int(stored["value"]) < 19:

@@ -1153,18 +1153,15 @@ channel has a `HEARD` column for each of your own messages:
 $ meshterm chat history --channel 0
 TIME  DIR  PEER    SNR_DB  HEARD  TEXT
  12m  in   Public    +6.5  -      Alice: anyone on the ridge?
- 10m  out  Public       -  3      heading up now
-  4m  out  Public       -  near   at the top
+ 10m  out  Public       -  2      heading up now
+  4m  out  Public       -  none   at the top
  now  out  Public       -  wait   coming down
 ```
 
-A number is the count of relays past your **near relays**: the first hop of each outbound
-path of the active site, or of the fixed device (refer to `meshterm outbound`). These
-relays heard your message, so it went farther than the repeaters next to you. `near`
-means that only your near relays sent it back. `none` means that no relay sent it back.
-`wait` means that the message is still in its wait (the `heard_wait_s` preference). With
-no outbound paths, each relay counts. MeshTerm sees only the relays that your radio hears,
-and only while it is connected. A received message has no value (`-`).
+A number is the count of repeaters that sent a copy back. `none` means that no repeater
+sent it back. `wait` means that the message is still in its wait (the `heard_wait_s`
+preference). MeshTerm sees only the relays that your radio hears, and only while it is
+connected. A received message has no value (`-`).
 
 **Rooms.** A room server is a message board that lives on a radio. First, join the room
 with [`meshterm rooms join`](#meshterm-rooms). After that, post with `send --to`, in the
@@ -1244,9 +1241,8 @@ the purpose of the one absence token. It is also the reason why the plain face p
 nothing there: it has no way to say it.
 
 `history` is an array, with the oldest message first. Each record also has `heard`
-(`"waiting"`, `"beyond"`, `"nearby"`, `"unheard"`, or `null` when the message is not
-your own channel message), `heard_by` (the hashes of the relays past your near relays),
-and `heard_via` (the near relays that carried the message out):
+(`"waiting"`, `"heard"`, `"unheard"`, or `null` when the message is not your own channel
+message) and `heard_by` (the hashes of the repeaters that sent a copy back):
 
 ```json
 {"created_at":"2026-09-08T08:27:37Z","direction":"out","node":{"name":"Alice","key":null,"hash":"d4e5f6a7","type":null,"self":false},"channel":null,"author":null,"snr_db":null,"text":"on my way","acked":true}

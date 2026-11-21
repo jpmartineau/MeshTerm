@@ -183,7 +183,6 @@ and in quoted text.
 | path | An ordered list of hops that you write or force (`a1,3d,…`) | |
 | route | The sequence of nodes that a trace went through or will go through | |
 | hop | One node in a path or a route | |
-| near relay | The first hop of an outbound path that applies now. A copy of our channel message that only near relays sent back proves that the message left our radio, not that it went farther | own repeater, home repeater, local relay |
 | outbound path | A path that starts at our node and goes out into the mesh, one or more hops long. The user trusts it for the first hops of a route, because the user knows which way out works | outbound leg (for this: an outbound leg is the outbound half of a trace) |
 | site | A name for where the user takes the computer (`Home`, `Foulab`), with its outbound paths in order. One site is active | profile (for this: a profile is a connection alias in `config.toml`) |
 | fixed device | A companion that never moves. It keeps its own outbound paths, and the active site does not apply to it | |

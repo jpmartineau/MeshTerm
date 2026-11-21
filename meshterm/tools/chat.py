@@ -1324,7 +1324,6 @@ def _message_columns(*, author_lane: bool = False, heard_lane: bool = False) -> 
         fields.hidden("acked"),
         fields.hidden("heard"),
         fields.hidden("heard_by"),
-        fields.hidden("heard_via"),
     )
 
 
@@ -1373,7 +1372,7 @@ def _author_ref(author: str, name_of: NodeResolver | None) -> NodeRef:
 async def _channel_verdicts(
     ctx: AppContext, channel: int, messages: list[ChatMessage]
 ) -> Callable[[ChatMessage], HeardBy | None] | None:
-    """The verdicts on our messages in a channel: did a relay past the near relays hear them?
+    """The verdicts on our messages in a channel: did a repeater send a copy back?
 
     Refer to :mod:`~meshterm.services.heard_by`. With no key for the slot, there is no
     verdict, and the column is absent on each row.
@@ -1388,7 +1387,7 @@ async def _channel_verdicts(
         name = str((payload or {}).get("channel_name") or f"#{channel}")
     except Exception:  # noqa: BLE001 - no key, no verdict. The history still prints
         return None
-    tracker = await make_tracker(ctx, channel_name=name, secret=secret)
+    tracker = make_tracker(ctx, channel_name=name, secret=secret)
     if tracker is None:
         return None
     await tracker.fill(messages)
@@ -1414,7 +1413,7 @@ def _transcript(
         me: Our node, the author of our own posts in a room.
         heard: Gives the verdict on each of our channel messages (refer to
             :mod:`~meshterm.services.heard_by`). With it, the plain face has a ``HEARD``
-            lane. The document always has ``heard``, ``heard_by``, and ``heard_via``.
+            lane. The document always has ``heard`` and ``heard_by``.
     """
     from ..ui.report import Listing
 
@@ -1449,8 +1448,7 @@ def _transcript(
                 "text": message.text,
                 "acked": message.acked,
                 "heard": verdict.state if verdict is not None else None,
-                "heard_by": list(verdict.beyond) if verdict is not None else None,
-                "heard_via": list(verdict.via) if verdict is not None else None,
+                "heard_by": list(verdict.relays) if verdict is not None else None,
                 "heard_cell": _heard_cell(verdict),
             }
         )
@@ -1464,20 +1462,19 @@ def _transcript(
 
 
 def _heard_cell(verdict: HeardBy | None) -> str:
-    """The plain ``HEARD`` cell: the number of relays past the near relays, or a word.
+    """The plain ``HEARD`` cell: the number of relays that sent a copy back, or a word.
 
-    ``near`` is a message that only the near relays sent back, ``none`` is one that no
-    relay sent back, and ``wait`` is one that is still in its wait. A message that is not
-    ours has no verdict (``-``).
+    ``none`` is a message that no repeater sent back, and ``wait`` is one that is still in
+    its wait. A message that is not ours has no verdict (``-``).
     """
-    from ..services.heard_by import BEYOND, NEARBY, UNHEARD, WAITING
+    from ..services.heard_by import HEARD, UNHEARD, WAITING
     from ..ui import script
 
     if verdict is None:
         return script.NONE
-    if verdict.state == BEYOND:
-        return str(len(verdict.beyond))
-    return {NEARBY: "near", UNHEARD: "none", WAITING: "wait"}.get(verdict.state, script.NONE)
+    if verdict.state == HEARD:
+        return str(len(verdict.relays))
+    return {UNHEARD: "none", WAITING: "wait"}.get(verdict.state, script.NONE)
 
 
 def _live_messages() -> Listing:
