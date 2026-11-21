@@ -11,12 +11,12 @@ flashes.
 MeshTerm has no audio dependency. It plays a WAV file through the player of the operating
 system:
 
-* **Windows**: ``winsound``, from the standard library.
+* **Windows**: MCI (``winmm``, through ``ctypes``), so that sounds can overlap.
 * **macOS**: ``afplay``.
 * **Linux** (the Cardputer Zero too): the first of ``pw-play``, ``paplay``, and ``aplay``
   that is installed.
 
-The volume is in MeshTerm, not in the player: ``winsound`` has no volume control. Thus the
+The volume is in MeshTerm, not in the player, so that it is the same with each player. Thus the
 service writes a scaled copy of each sound into a cache folder, one time for each volume,
 and plays the copy. The ``bell`` theme plays no file. It sends the terminal bell (BEL),
 which rings on the computer of the user, also over SSH.
@@ -167,8 +167,66 @@ def scaled(source: Path, volume_pct: int, cache_dir: Path) -> Path:
     return target
 
 
+class _Mci:
+    """Plays WAV files on Windows through MCI (``winmm``), each sound on its own device.
+
+    ``winsound`` plays one sound at a time: a new sound stops the sound that plays. MCI
+    opens a new ``waveaudio`` device for each sound, and Windows mixes the devices. Thus two
+    sounds play at the same time (JP, 2026-11-21: "playing a sound shouldn't interrupt an
+    already playing sound"). Each device closes at the next sound after it stops.
+    """
+
+    def __init__(self) -> None:
+        """Bind ``mciSendStringW`` from ``winmm``."""
+        import ctypes
+
+        self._ctypes = ctypes
+        self._send_string = ctypes.windll.winmm.mciSendStringW  # type: ignore[attr-defined]
+        self._count = 0
+        self._open: list[str] = []
+
+    def _send(self, command: str) -> str:
+        """Send one MCI command string, and return its answer.
+
+        Raises:
+            OSError: If MCI refuses the command.
+        """
+        answer = self._ctypes.create_unicode_buffer(64)
+        error = self._send_string(command, answer, len(answer), None)
+        if error:
+            raise OSError(f"MCI error {error} for {command.split()[0]!r}")
+        return answer.value
+
+    def play(self, path: Path) -> None:
+        """Open a new device on the file, and start it without a wait."""
+        self._close_stopped()
+        self._count += 1
+        alias = f"meshterm{self._count}"
+        self._send(f'open "{path}" type waveaudio alias {alias}')
+        self._open.append(alias)
+        self._send(f"play {alias}")
+
+    def _close_stopped(self) -> None:
+        """Close each device whose sound has ended."""
+        for alias in list(self._open):
+            try:
+                playing = self._send(f"status {alias} mode") == "playing"
+            except OSError:
+                playing = False
+            if not playing:
+                try:
+                    self._send(f"close {alias}")
+                except OSError:
+                    pass
+                self._open.remove(alias)
+
+
 class Player:
     """Plays a WAV file through the player of the operating system, without a wait.
+
+    Sounds play at the same time: a new sound never stops one that plays. On macOS and
+    Linux, each sound is its own player process. On Windows, each sound is its own MCI
+    device (refer to :class:`_Mci`).
 
     The first failure goes to the log, and then the player stays off for the session.
     """
@@ -178,6 +236,7 @@ class Player:
         self.broken = False
         self._command: list[str] | None = None
         self._running: list[subprocess.Popen[bytes]] = []
+        self._mci: _Mci | None = None
 
     def play(self, path: Path) -> bool:
         """Start the sound, and return at once.
@@ -192,10 +251,9 @@ class Player:
             return False
         try:
             if sys.platform == "win32":
-                import winsound
-
-                flags = winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
-                winsound.PlaySound(str(path), flags)
+                if self._mci is None:
+                    self._mci = _Mci()
+                self._mci.play(path)
                 return True
             return self._spawn(path)
         except Exception as error:  # noqa: BLE001 - any failure of the player makes it off.

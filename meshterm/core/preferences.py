@@ -540,9 +540,8 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         question="How loud the sounds play: 1 is 10%, 10 is 100%",
         group="Sound",
         value_type="int",
-        # A slider of ten steps (JP, 2026-11-20). MeshTerm scales the samples itself,
-        # because winsound, the only player on Windows, has no volume control. Thus the
-        # volume is the same with each player.
+        # A slider of ten steps (JP, 2026-11-20). MeshTerm scales the samples itself, so
+        # that the volume is the same with each player.
         default=7,
         minimum=1,
         maximum=10,

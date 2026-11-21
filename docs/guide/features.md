@@ -117,9 +117,10 @@ selects when: off, on, or **when silent** (the default), which flashes when the 
 muted or the theme is no sound. The PicoCalc has no sound, so there each notification
 flashes.
 
-MeshTerm plays the sounds through the player of your computer: `winsound` on Windows,
-`afplay` on macOS, and `pw-play`, `paplay`, or `aplay` on Linux. If none of them works,
-MeshTerm writes one line in its log and continues with no sound.
+MeshTerm plays the sounds through the player of your computer: MCI on Windows, `afplay` on
+macOS, and `pw-play`, `paplay`, or `aplay` on Linux. Two sounds can play at the same time:
+a new sound does not stop one that plays. If no player works, MeshTerm writes one line in
+its log and continues with no sound.
 
 ## Leaving MeshTerm
 

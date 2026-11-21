@@ -347,3 +347,32 @@ def test_a_room_catch_up_lasts_until_a_pause() -> None:
     assert rooms.catching_up("a1b2c3d4e5f6", now=103.0 + CATCH_UP_QUIET_S - 1) is True
     assert rooms.catching_up("a1b2c3d4e5f6", now=200.0) is False  # the pause ended it
     assert rooms.catching_up("a1b2c3d4e5f6", now=201.0) is False
+
+
+def test_mci_opens_a_device_for_each_sound_and_closes_the_stopped_ones() -> None:
+    """Each sound gets its own device, so a new sound never stops one that plays."""
+    from meshterm.services.sound import _Mci
+
+    sent: list[str] = []
+    playing: set[str] = set()
+
+    def send(command: str) -> str:
+        sent.append(command)
+        verb, alias = command.split()[0], command.split()[-1]
+        if verb == "play":
+            playing.add(alias)
+        if verb == "status":
+            return "playing" if command.split()[1] in playing else "stopped"
+        return ""
+
+    mci = _Mci.__new__(_Mci)
+    mci._count, mci._open = 0, []
+    mci._send = send  # type: ignore[method-assign]
+    mci.play(Path("a.wav"))
+    mci.play(Path("b.wav"))
+    assert mci._open == ["meshterm1", "meshterm2"]  # both play at the same time
+    assert not any(c.startswith("stop") for c in sent)
+    playing.discard("meshterm1")  # the first sound ended
+    mci.play(Path("c.wav"))
+    assert mci._open == ["meshterm2", "meshterm3"]
+    assert "close meshterm1" in sent
