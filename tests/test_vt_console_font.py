@@ -267,8 +267,14 @@ def test_the_preference_is_offered_on_the_handheld_only() -> None:
     spec = get_spec("console_font")
     assert spec.offered_on("picocalc-lyra") is True
     assert spec.offered_on("regular") is False
-    # All other preferences are offered on all platforms. The gate is the exception.
-    gated = {s.key for _, specs in by_group() for s in specs if s.platforms is not None}
+    # The other gated preferences are the sound preferences, which the PicoCalc does not
+    # offer because it has no sound. All other preferences are offered on all platforms.
+    gated = {
+        s.key
+        for group, specs in by_group()
+        for s in specs
+        if s.platforms is not None and group != "Sound"
+    }
     assert gated == {"console_font"}
 
 

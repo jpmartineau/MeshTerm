@@ -169,6 +169,12 @@ class Platform:
         battery: The source of the battery gauge in the header. ``"companion"`` reads it from
             the connected MeshCore device. ``"host"`` reads it from the ``power_supply``
             driver of sysfs on the PicoCalc itself (confirmed present in P0). Wired in P5.
+        sound: Whether this platform can play a sound. ``True`` lets MeshTerm play its
+            notification sounds through the player of the operating system (refer to
+            :mod:`~meshterm.services.sound`). ``False`` on the PicoCalc: its speaker is silent
+            on the Lyra, because the speaker pins of the board cannot do hardware PWM. There,
+            the Preferences page does not offer the sound preferences, and a notification is
+            silent. The title bar can still flash for it.
         own_display: Whether MeshTerm itself draws this display (:mod:`meshterm.emulator`)
             and does not run in a terminal. Then the app is its own terminal, and the
             terminal that started it is not its business. Examples are a classic Windows
@@ -204,6 +210,7 @@ class Platform:
     tick_s: float
     spinner_tick_s: float
     battery: str
+    sound: bool
     own_display: bool
     modifier_watch: str
 
@@ -236,6 +243,7 @@ REGULAR = Platform(
     tick_s=1.0,
     spinner_tick_s=0.12,
     battery="companion",
+    sound=True,
     own_display=False,
     modifier_watch="",
 )
@@ -268,6 +276,7 @@ PICOCALC_LYRA = Platform(
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="host",
+    sound=False,
     own_display=False,
     modifier_watch="picocalc",
 )
@@ -318,11 +327,15 @@ CARDPUTER_ZERO = Platform(
     tick_s=2.0,
     spinner_tick_s=0.5,
     battery="host",
+    sound=True,
     own_display=True,
     modifier_watch="tca8418c",
 )
 
-_BY_NAME = {p.name: p for p in (REGULAR, PICOCALC_LYRA, CARDPUTER_ZERO)}
+#: Each platform, in a fixed order.
+ALL_PLATFORMS: tuple[Platform, ...] = (REGULAR, PICOCALC_LYRA, CARDPUTER_ZERO)
+
+_BY_NAME = {p.name: p for p in ALL_PLATFORMS}
 
 #: The active platform. Do not import this name directly (refer to the module docstring).
 #: Read it through :func:`get_platform`, and change it only through :func:`set_platform`.

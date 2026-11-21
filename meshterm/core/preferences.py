@@ -55,6 +55,7 @@ from .atomicwrite import write_atomically
 from .courier_store import DONE_CAP
 from .geo import DEFAULT_VIEW_FRACTION
 from .models import CLOCK_TOLERANCE_S, NAME_OVERLAP_DAYS
+from ..platforms import ALL_PLATFORMS
 from .watch_store import ALERT_CAP, DEFAULT_SILENCE_HOURS, OFF, SILENCE_CHOICES_H
 
 if sys.version_info >= (3, 11):
@@ -74,6 +75,7 @@ GROUPS: tuple[str, ...] = (
     "Watchtower",
     "Map",
     "History",
+    "Sound",
     "Display",
     "Diagnostics",
 )
@@ -153,6 +155,30 @@ class PrefSpec:
 #: The two forms in which the plain CLI can print a time. Their names tell what the user
 #: sees, not the mechanism: an age is how long ago, and a timestamp is when.
 _CLI_TIME_CHOICES: dict[str, str] = {"relative": "ages", "absolute": "timestamps"}
+
+#: The platforms that can play a sound (:attr:`~meshterm.platforms.Platform.sound`). The
+#: Preferences page offers the sound preferences only there. A notification on the other
+#: platforms is silent, and only the title bar can flash for it.
+_SOUND_PLATFORMS: frozenset[str] = frozenset(p.name for p in ALL_PLATFORMS if p.sound)
+
+#: The sound themes (refer to :data:`meshterm.services.sound.THEMES`). ``android`` plays the
+#: sounds of ``meshterm/assets/sounds/android``. ``bell`` sends the terminal bell (BEL) for
+#: each event, which rings on the computer of the user also over SSH. ``none`` plays
+#: nothing.
+_SOUND_THEME_CHOICES: dict[str, str] = {
+    "android": "Android",
+    "bell": "terminal bell",
+    "none": "no sound",
+}
+
+#: When the title bar flashes for a notification. ``silent`` flashes only when no sound
+#: plays for it: sounds are off, the theme is ``none``, the platform has no sound, or the
+#: player failed.
+_FLASH_CHOICES: dict[str, str] = {"off": "off", "on": "on", "silent": "when silent"}
+
+#: When a conversation plays its sound. A mention of our node always plays the mention
+#: sound, unless the conversation is ``off``.
+SOUND_WHEN_CHOICES: dict[str, str] = {"off": "off", "mentions": "mentions", "all": "all messages"}
 
 #: The sources of the place of a node (refer to :mod:`meshterm.services.places`). With
 #: ``tiles_nominatim``, the map tiles give the first answer at once, and Nominatim corrects it
@@ -474,6 +500,110 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         group="Map",
         value_type="str",
         default="https://nominatim.openstreetmap.org",
+    ),
+    # --- Sound ---------------------------------------------------------------------
+    PrefSpec(
+        key="sounds",
+        label="Sounds",
+        help="Play a sound for notifications. ^S turns it on or off",
+        group="Sound",
+        value_type="bool",
+        # Off: a new user hears nothing until they ask for it (the request on Discord,
+        # 2026-09-26: "Defaulted to off though"). ^S changes this preference from any
+        # screen, and the header shows its state (🔊 on, 🔇 off).
+        default=False,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="sound_theme",
+        label="Sound theme",
+        help="The set of sounds that notifications play",
+        group="Sound",
+        value_type="enum",
+        default="android",
+        choices=_SOUND_THEME_CHOICES,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="sound_volume_pct",
+        label="Volume",
+        help="How loud the sounds play, before the volume of the system",
+        group="Sound",
+        value_type="int",
+        # MeshTerm scales the samples itself (JP, 2026-11-20), because winsound, the only
+        # player on Windows, has no volume control. Thus the volume is the same with each
+        # player. 70: the AOSP chimes are loud at full scale.
+        default=70,
+        minimum=5,
+        maximum=100,
+        unit="%",
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="notify_flash",
+        label="Flash",
+        help="Flash the title bar for a notification",
+        group="Sound",
+        value_type="enum",
+        # When silent: the flash replaces a sound that does not play, and it does not add to
+        # one that does. On the PicoCalc, which has no sound, each notification flashes.
+        default="silent",
+        choices=_FLASH_CHOICES,
+    ),
+    PrefSpec(
+        key="dm_sound",
+        label="DM sound",
+        help="When a DM plays a sound, if its own Sound is Default",
+        group="Sound",
+        value_type="enum",
+        default="all",
+        choices=SOUND_WHEN_CHOICES,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="channel_sound",
+        label="Channel sound",
+        help="When a channel plays a sound, if its own Sound is Default",
+        group="Sound",
+        value_type="enum",
+        # Mentions: a public channel can carry many messages each hour.
+        default="mentions",
+        choices=SOUND_WHEN_CHOICES,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="room_sound",
+        label="Room sound",
+        help="When a room plays a sound, if its own Sound is Default",
+        group="Sound",
+        value_type="enum",
+        default="mentions",
+        choices=SOUND_WHEN_CHOICES,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="packet_tick",
+        label="Packet tick",
+        help="A short tick for each packet heard that plays no other sound",
+        group="Sound",
+        value_type="bool",
+        # Off: a busy mesh can send many packets each minute. The service plays at most one
+        # tick each 250 ms (JP, 2026-11-20).
+        default=False,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="battery_low_pct",
+        label="Battery low",
+        help="Play the battery sound when the battery goes below this level",
+        group="Sound",
+        value_type="int",
+        # 25: the level where the gauge of the header changes to its low band (batt.low).
+        default=25,
+        minimum=5,
+        maximum=90,
+        unit="%",
+        platforms=_SOUND_PLATFORMS,
     ),
     # --- History kept ------------------------------------------------------------
     PrefSpec(
