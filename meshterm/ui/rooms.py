@@ -48,6 +48,8 @@ from ..core.models import (
     is_room,
 )
 from ..platforms import get_platform
+from . import conversation_sound
+from .conversation_sound import SOUND_ICON, SOUND_ROW, sound_row
 from .menus import (
     Lane,
     column_header,
@@ -495,6 +497,8 @@ async def _room_detail(ctx: AppContext, key: str) -> int:
                 from .room import open_room
 
                 await open_room(ctx, Conversation(label=room.name, is_channel=False, contact=room))
+            elif choice == SOUND_ROW:
+                await conversation_sound.pick_sound(ctx, f"dm:{_peer(room)}", "room", room.name)
             elif choice == _FORGET:
                 await _forget(ctx, room)
             elif choice == _DELETE:
@@ -536,7 +540,7 @@ def _detail_items(ctx: AppContext, room: Contact) -> list:
     stored = bool(
         ctx.repo.recent_chat_messages(is_channel=False, peer=peer, posts_only=True, limit=1)
     )
-    lane = icon_lane(("💬", "↻", "🔑", "🗑"))
+    lane = icon_lane(("💬", "↻", "🔑", SOUND_ICON, "🗑"))
     unread = ctx.chat.unread(f"dm:{peer}")
     rows: list = []
     if joined:
@@ -555,6 +559,11 @@ def _detail_items(ctx: AppContext, room: Contact) -> list:
                 marked_label("🔑", "Change password…", "", lane=lane),
                 "Log in with a different password",
                 _PASSWORD,
+            ),
+            *(
+                [sound_row(ctx, f"dm:{peer}", "room", lane)]
+                if conversation_sound.offered(ctx)
+                else []
             ),
             (
                 marked_label("🗑", "Forget this room…", "err", lane=lane),
