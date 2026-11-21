@@ -1985,6 +1985,15 @@ def _quit_hold(cols: int, rows: int) -> Screen:
     return HoldQuitDialog(0.0, clock=lambda: (DIALOG_S + QUIT_S) / 2)
 
 
+def _volume_slider(cols: int, rows: int) -> Screen:
+    """The volume slider of the Preferences page, at its default step."""
+    from meshterm.core.preferences import get_spec
+    from meshterm.ui.slider import SliderScreen
+
+    spec = get_spec("sound_volume")
+    return SliderScreen(spec.label, spec.help, 7, 1, 10, more="Louder", less="Softer")
+
+
 def _share_qr(cols: int, rows: int) -> Screen:
     """The share screen: the code and the link of a contact card on a bare frame (the widest QR)."""
     from meshterm.ui.qr import QrScreen
@@ -2138,6 +2147,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("cooldown_countdown", _cooldown_countdown),
     _Entry("reconnect_reason", _reconnect_reason),
     _Entry("quit_hold", _quit_hold),
+    _Entry("volume_slider", _volume_slider),
     _Entry("about_meshterm", _about_meshterm),
     _Entry("about_author", _about_author),
     _Entry("join_discord", _join_discord),

@@ -303,18 +303,26 @@ class SoundService:
                     self._flash()
         return audible
 
-    def preview(self, event: SoundEvent = SoundEvent.CHANNEL_MESSAGE) -> bool:
+    def preview(
+        self, event: SoundEvent = SoundEvent.CHANNEL_MESSAGE, volume: int | None = None
+    ) -> bool:
         """Play the sound of an event at the current volume, also when the sounds are muted.
 
         The Preferences page calls it while the user changes the volume or the theme
         (JP, 2026-11-20: "while adjusting the volume, play the channel message sound").
 
+        Args:
+            event: The event whose sound plays.
+            volume: The volume from 1 to 10, or ``None`` for the ``sound_volume``
+                preference. The volume slider gives the value that it shows, before the
+                user applies it.
+
         Returns:
             ``True`` if a sound started.
         """
-        return self.available and self._emit(event)
+        return self.available and self._emit(event, volume)
 
-    def _emit(self, event: SoundEvent) -> bool:
+    def _emit(self, event: SoundEvent, volume: int | None = None) -> bool:
         """Play the sound of an event in the current theme, with no rules."""
         theme = self._prefs.sound_theme
         if theme == "bell":
@@ -329,7 +337,7 @@ class SoundService:
         try:
             path = scaled(
                 SOUNDS_DIR / files[event],
-                int(self._prefs.sound_volume) * 10,
+                int(self._prefs.sound_volume if volume is None else volume) * 10,
                 self._ctx.settings.config_dir / "sound-cache",
             )
         except (OSError, wave.Error, EOFError) as error:

@@ -61,7 +61,8 @@ from .menus import (
     lane_row,
     section_heading,
 )
-from .tui import Choice, Separator
+from .slider import SliderScreen
+from .tui import CANCEL, Choice, Separator
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -488,6 +489,23 @@ async def _prompt_value(ctx: AppContext, spec: PrefSpec, current: Any) -> Any:
         return await ctx.ui.select(
             spec.label, items, prompt=f"{spec.description}:", default=current
         )
+
+    if spec.key == "sound_volume":
+        # A slider of ten steps, and each step plays the channel message sound at the new
+        # volume (JP, 2026-11-20). The value is staged, so the preview gives it directly.
+        result = await ctx.ui.session.run_screen(
+            SliderScreen(
+                spec.label,
+                spec.help,
+                int(current),
+                int(spec.minimum or 1),
+                int(spec.maximum or 10),
+                on_change=lambda volume: ctx.sound.preview(volume=volume),
+                more="Louder",
+                less="Softer",
+            )
+        )
+        return None if result is CANCEL else result
 
     def validate(text: str) -> bool | str:
         try:
