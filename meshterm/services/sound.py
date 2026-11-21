@@ -95,6 +95,17 @@ TICK_DELAY_S = 0.15
 #: around the threshold plays the sound at each poll.
 BATTERY_REARM_PCT = 5
 
+#: The preference that turns each event on or off (JP, 2026-11-21). All are on by default,
+#: except the packet tick.
+EVENT_PREFERENCE: dict[SoundEvent, str] = {
+    SoundEvent.DIRECT_MESSAGE: "sound_dm",
+    SoundEvent.MENTION: "sound_mention",
+    SoundEvent.CHANNEL_MESSAGE: "sound_channel",
+    SoundEvent.ROOM_POST: "sound_room",
+    SoundEvent.BATTERY_LOW: "sound_battery",
+    SoundEvent.PACKET_TICK: "packet_tick",
+}
+
 #: The minimum seconds between the start of a sound and a packet tick. It limits the tick
 #: to four each second on a busy mesh, and a tick does not play over the start of another
 #: sound (JP, 2026-11-20).
@@ -311,6 +322,10 @@ class SoundService:
         """Whether the theme makes a sound (``android`` or ``bell``, not ``none``)."""
         return self._prefs.sound_theme != "none"
 
+    def event_on(self, event: SoundEvent) -> bool:
+        """Whether the preference of an event turns it on (refer to EVENT_PREFERENCE)."""
+        return bool(self._prefs.get(EVENT_PREFERENCE[event]))
+
     def toggle(self) -> bool:
         """Mute or unmute the sounds (the ^S key), and save the preference.
 
@@ -328,18 +343,19 @@ class SoundService:
     def notify(self, event: SoundEvent) -> bool:
         """Play the sound of an event, and flash the title bar if the preference says so.
 
+        An event that its preference turns off does nothing: no sound, and no flash.
+
         Args:
             event: The event.
 
         Returns:
             ``True`` if a sound started (a file or the bell).
         """
+        if not self.event_on(event):
+            return False
         tick = event is SoundEvent.PACKET_TICK
-        if tick:
-            if not self._prefs.packet_tick:
-                return False
-            if self._clock() - self._last_sound < TICK_GAP_S:
-                return False
+        if tick and self._clock() - self._last_sound < TICK_GAP_S:
+            return False
         audible = self.enabled and self._emit(event)
         if not tick:
             mode = self._prefs.notify_flash

@@ -33,7 +33,6 @@ from .core.remote_store import RemoteStore
 from .core.room_store import RoomStore
 from .core.selection import resolve_device
 from .core.settings_store import SettingsStore
-from .core.sound_store import SoundStore
 from .core.watch_store import WatchStore
 from .persistence.logging import get_logger
 from .persistence.repository import Repository
@@ -90,9 +89,6 @@ class AppContext:
         mute_store: The store for muted channel notifications. These are the channels whose
             new messages do not raise the unread badge (if the caller does not inject it, the
             default is ``<config_dir>/mutes.json``).
-        sound_store: The store for the sound setting of each conversation: when it plays a
-            sound, if it does not follow the default of its kind (if the caller does not
-            inject it, the default is ``<config_dir>/sounds.json``).
         region_store: The store for the regions that have a name, and for the send scope of
             each channel. MeshTerm resolves a scoped flood against it (if the caller does not
             inject it, the default is ``<config_dir>/regions.json``).
@@ -156,7 +152,6 @@ class AppContext:
     watch_store: WatchStore | None = None
     courier_store: CourierStore | None = None
     mute_store: MuteStore | None = None
-    sound_store: SoundStore | None = None
     region_store: RegionStore | None = None
     channel_store: ChannelStore | None = None
     settings_store: SettingsStore | None = None
@@ -238,8 +233,6 @@ class AppContext:
             self.courier_store = CourierStore(self.settings.config_dir / "courier.json")
         if self.mute_store is None:
             self.mute_store = MuteStore(self.settings.config_dir / "mutes.json")
-        if self.sound_store is None:
-            self.sound_store = SoundStore(self.settings.config_dir / "sounds.json")
         if self.region_store is None:
             self.region_store = RegionStore(self.settings.config_dir / "regions.json")
         if self.channel_store is None:

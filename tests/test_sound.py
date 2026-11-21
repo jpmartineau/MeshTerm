@@ -301,3 +301,28 @@ def test_no_tick_is_scheduled_when_the_tick_is_off(tmp_path: Path) -> None:
         return service._tick_pending
 
     assert asyncio.run(run()) is False
+
+
+def test_each_event_has_a_switch_on_by_default_except_the_tick() -> None:
+    """Each event names a preference. All are on by default, except the packet tick."""
+    from meshterm.core.preferences import get_spec
+    from meshterm.services.sound import EVENT_PREFERENCE
+
+    assert set(EVENT_PREFERENCE) == set(SoundEvent)
+    for event, key in EVENT_PREFERENCE.items():
+        assert get_spec(key).default is (event is not SoundEvent.PACKET_TICK)
+
+
+def test_a_switched_off_event_plays_nothing_and_does_not_flash(tmp_path: Path) -> None:
+    """An event that its switch turns off does nothing at all."""
+    service, player, _, flashes, _ = _service(tmp_path, sound_dm=False)
+    assert service.notify(SoundEvent.DIRECT_MESSAGE) is False
+    assert player.played == [] and flashes == []
+    assert service.notify(SoundEvent.ROOM_POST) is True
+
+
+def test_the_battery_switch_silences_the_battery_sound(tmp_path: Path) -> None:
+    """With ``sound_battery`` off, a low battery plays nothing."""
+    service, player, _, _, _ = _service(tmp_path, sound_battery=False)
+    service.note_battery(10, charging=False)
+    assert player.played == []

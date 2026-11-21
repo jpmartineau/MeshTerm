@@ -180,14 +180,6 @@ _SOUND_THEME_CHOICES: dict[str, str] = {
 #: player failed.
 _FLASH_CHOICES: dict[str, str] = {"off": "off", "on": "on", "silent": "when silent"}
 
-#: When a conversation plays its sound. A mention of our node always plays the mention
-#: sound, unless the conversation is ``off``.
-SOUND_WHEN_CHOICES: dict[str, str] = {
-    "off": "never",
-    "mentions": "mentions only",
-    "all": "every message",
-}
-
 #: The sources of the place of a node (refer to :mod:`meshterm.services.places`). With
 #: ``tiles_nominatim``, the map tiles give the first answer at once, and Nominatim corrects it
 #: later, when MeshTerm is online, because only Nominatim knows the boundaries of a place.
@@ -561,72 +553,67 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         default="silent",
         choices=_FLASH_CHOICES,
     ),
+    # One switch for each sound event (JP, 2026-11-21: "These events should have on/off
+    # setting. All default to on, except packet tick"). A muted channel stays silent, and
+    # the conversation on the screen makes no sound.
     PrefSpec(
-        key="dm_sound",
-        label="DM sound",
-        help="Unless set per DM",
-        question="When a DM plays a sound, unless the DM has its own setting",
-        group="Sound",
-        value_type="enum",
-        default="all",
-        choices=SOUND_WHEN_CHOICES,
-        platforms=_SOUND_PLATFORMS,
-    ),
-    PrefSpec(
-        key="channel_sound",
-        label="Channel sound",
-        help="For channels not muted",
-        question="When a channel plays a sound. A muted channel plays none",
-        group="Sound",
-        value_type="enum",
-        # Mentions: a public channel can carry many messages each hour.
-        default="mentions",
-        choices=SOUND_WHEN_CHOICES,
-        platforms=_SOUND_PLATFORMS,
-    ),
-    PrefSpec(
-        key="mention_sound_always",
-        label="Mentions always",
-        help="Even if muted or never",
-        question=(
-            "Play the mention sound for each mention of your node, also on a muted channel"
-            " and in a conversation set to never"
-        ),
+        key="sound_dm",
+        label="Direct message",
+        help="When a DM arrives",
+        question="Play a sound when a direct message arrives",
         group="Sound",
         value_type="bool",
-        # On: a mention is the message that the user most wants to hear (JP, 2026-11-21:
-        # "a global always play sound for mentions"). The ^S mute still silences it.
         default=True,
         platforms=_SOUND_PLATFORMS,
     ),
     PrefSpec(
-        key="room_sound",
-        label="Room sound",
-        help="Unless set per room",
-        question="When a room plays a sound, unless the room has its own setting",
+        key="sound_mention",
+        label="Mention",
+        help="When a message names you",
+        question=(
+            "Play the mention sound when a message mentions your node. Off: the message"
+            " plays the sound of its kind"
+        ),
         group="Sound",
-        value_type="enum",
-        default="mentions",
-        choices=SOUND_WHEN_CHOICES,
+        value_type="bool",
+        default=True,
         platforms=_SOUND_PLATFORMS,
     ),
     PrefSpec(
-        key="packet_tick",
-        label="Packet tick",
-        help="A tick for other packets",
-        question="A short tick for each packet heard that plays no other sound",
+        key="sound_channel",
+        label="Channel message",
+        help="Not on a muted channel",
+        question="Play a sound when a message arrives on a channel that is not muted",
         group="Sound",
         value_type="bool",
-        # Off: a busy mesh can send many packets each minute. The service plays at most one
-        # tick each 250 ms (JP, 2026-11-20).
-        default=False,
+        default=True,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="sound_room",
+        label="Room post",
+        help="When a room sends a post",
+        question="Play a sound when a room sends a new post",
+        group="Sound",
+        value_type="bool",
+        default=True,
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="sound_battery",
+        label="Battery low",
+        help="When the battery goes low",
+        question="Play a sound when the battery goes below the low level",
+        group="Sound",
+        value_type="bool",
+        default=True,
         platforms=_SOUND_PLATFORMS,
     ),
     PrefSpec(
         key="battery_low_pct",
-        label="Battery low",
-        help="Plays the battery sound",
-        question="Play the battery sound when the battery goes below this level",
+        label="Low level",
+        help="Where the battery is low",
+        question="The battery level below which the battery sound plays",
         group="Sound",
         value_type="int",
         # 25: the level where the gauge of the header changes to its low band (batt.low).
@@ -634,6 +621,18 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         minimum=5,
         maximum=90,
         unit="%",
+        platforms=_SOUND_PLATFORMS,
+    ),
+    PrefSpec(
+        key="packet_tick",
+        label="Packet tick",
+        help="A tick for other packets",
+        question="Play a short tick for each packet heard that plays no other sound",
+        group="Sound",
+        value_type="bool",
+        # Off: a busy mesh can send many packets each minute. The service plays at most one
+        # tick each 250 ms (JP, 2026-11-20).
+        default=False,
         platforms=_SOUND_PLATFORMS,
     ),
     # --- History kept ------------------------------------------------------------
@@ -863,6 +862,12 @@ RETIRED: frozenset[str] = frozenset(
         # replaced, and a volume in percent that a slider of ten steps replaced.
         "sounds",
         "sound_volume_pct",
+        # The sound of each kind of conversation (never, mentions only, or every message)
+        # and the mention override, replaced on 2026-11-21 by one switch for each event.
+        "dm_sound",
+        "channel_sound",
+        "room_sound",
+        "mention_sound_always",
     }
 )
 

@@ -112,19 +112,11 @@ from rich.text import Text
 
 from ..core.connection import ContactNotOnDeviceError, DeviceCommandError
 from ..core.geo import haversine_km, usable_fix
-from ..core.models import (
-    NODE_TYPE_LABELS,
-    NODE_TYPE_REPEATER,
-    NODE_TYPE_ROOM,
-    Contact,
-    conversation_key,
-    is_direct_messageable,
-    utcnow,
-)
+from ..core.models import NODE_TYPE_LABELS, NODE_TYPE_REPEATER, NODE_TYPE_ROOM, Contact, utcnow
 from ..core.places import SOURCE_USER
 from ..platforms import Platform, on_platform
 from ..services.clock_offsets import node_offset, room_posts_blocked
-from . import conversation_sound, menus
+from . import menus
 from .device_route_screen import ACTION as DEVICE_ROUTE_ACTION
 from .device_route_screen import ICON as DEVICE_ROUTE_ICON
 from .device_route_screen import RouteEnv, open_device_route
@@ -1848,12 +1840,6 @@ async def open_node_detail(
     # map (a roof, a tower), or a place for a node with no location at all.
     if places is not None and node_id:
         info_actions.append(_Action("place", "✎", "", "Set place…"))
-    # The sound of the conversation with this node: a DM with a companion, or the board of a
-    # room (refer to meshterm.ui.conversation_sound). Only where a sound can play.
-    sound_kind = _sound_kind(ctx, contact, you, node_type)
-    sound_key = _sound_key(contact) if sound_kind else None
-    if sound_kind and sound_key:
-        info_actions.append(_sound_action(ctx, sound_key, sound_kind))
     if you:
         # Our page is where the user looks at our node, so it offers the tools of the main
         # menu that act on our node: its whole ``This node`` section, row for row.
@@ -2096,12 +2082,6 @@ async def open_node_detail(
                 if await _restore_archived(ctx, contact, self_key, label):
                     contact_removed = True
                     break
-            elif action == conversation_sound.SOUND_ROW:
-                assert sound_kind and sound_key  # offered only for a conversation
-                if await conversation_sound.pick_sound(ctx, sound_key, sound_kind, label):
-                    fresh = _sound_action(ctx, sound_key, sound_kind)
-                    base_actions = [fresh if a.key == fresh.key else a for a in base_actions]
-                    screen.replace_info_actions(management(locked))
             elif action in ("lock", "unlock"):
                 # No confirm and no notice. The same row that set the lock can reverse it,
                 # and the change of the row into its opposite is the acknowledgement.
@@ -2185,42 +2165,6 @@ async def _read_self_info(ctx: AppContext) -> dict:
 def _shown_self(info: dict) -> tuple:
     """The values of the self-info that the page of our node shows."""
     return tuple(info.get(field) for field in _SHOWN_SELF_FIELDS)
-
-
-def _sound_kind(
-    ctx: AppContext, contact: Contact | None, you: bool, node_type: int | None
-) -> str | None:
-    """The kind of the conversation with a node, for its sound row, or ``None`` for no row.
-
-    A companion is a DM, and a room server is a room. Our node, a node with no key, and a
-    repeater or a sensor (which has no conversation) have no row. Nor does a platform that
-    cannot play a sound.
-    """
-    if you or contact is None or not conversation_sound.offered(ctx):
-        return None
-    if node_type == NODE_TYPE_ROOM:
-        return "room"
-    return "dm" if is_direct_messageable(node_type) else None
-
-
-def _sound_key(contact: Contact | None) -> str | None:
-    """The key of the conversation with a contact (``dm:<key prefix>``), or ``None``.
-
-    The key prefix is the first six bytes of the key, as the address of a direct message
-    and the history use it (refer to :func:`~meshterm.core.models.conversation_key`).
-    """
-    if contact is None:
-        return None
-    prefix = (contact.key_prefix or contact.public_key[:12] or "").lower()
-    return conversation_key(False, None, prefix) if prefix else None
-
-
-def _sound_action(ctx: AppContext, key: str, kind: str) -> _Action:
-    """The sound row of the node page, with what the conversation plays now."""
-    description = conversation_sound.describe(ctx, key, kind)
-    return _Action(
-        conversation_sound.SOUND_ROW, conversation_sound.SOUND_ICON, "", f"Sound — {description}…"
-    )
 
 
 def _management_rows(

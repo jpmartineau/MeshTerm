@@ -563,7 +563,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   🔒 lock (a locked contact, a private channel) · 🔓 unlock · 🗑 clear/delete · ✎ compose/edit ·
   ⚙ parameter · `#` count · ▶ run · ⚡ explore/probe · ★ best/winner · ⭐ watch ·
   📤 send now · 📨 courier/queue · 💬 chat · 🔔 notify · 🔕 mute (notifications off) ·
-  🔊 sound on / a conversation's Sound row · 🔇 sounds muted (header, menu row) ·
+  🔊 sounds on · 🔇 sounds muted (header, menu row) ·
   📱 QR · 🔗 link · ↻ re-read · ↕ reorder · ⇄ reverse (flip a path's direction) ·
   🔖 region/scope · 📌 rooms · 🏆 trophy case/record · ⌨ command line · 📖 read/about · 💰 support/donate ·
   🎨 pixel image (an MCOimg picture in a message) · 🚪 quit. Packet-class icons (feed/viewer

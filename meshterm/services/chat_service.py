@@ -482,63 +482,40 @@ class ChatService:
         return await self._is_listed_contact(message.sender, post=message.is_post)
 
     async def _play_sound(self, message: Message, key: str, *, muted: bool = False) -> None:
-        """Play the sound of a received message, if its conversation wants one.
+        """Play the sound of a received message.
 
         The rule (JP, 2026-11-21):
 
         * The open conversation makes no sound, the same as its unread count: the user
           already sees the message.
-        * With ``mention_sound_always`` on (the default), a mention of our node always plays
-          the mention sound, also on a muted channel and in a conversation set to ``off``.
-        * A muted channel (``muted``, refer to MuteStore) plays nothing else. A mute turns
-          off the notifications of the channel, and a sound is one.
-        * A channel follows the ``channel_sound`` preference. Channels have no setting of
-          their own. A DM and a room have their own setting (refer to
-          :class:`~meshterm.core.sound_store.SoundStore`), or follow ``dm_sound`` and
-          ``room_sound``.
-        * ``off`` plays nothing. Otherwise a mention plays the mention sound. ``all`` plays
-          the sound of the kind for each other message, and ``mentions`` plays nothing for
-          it.
+        * A muted channel (``muted``, refer to MuteStore) makes no sound, also for a
+          mention. A mute turns off the notifications of the channel, and a sound is one.
+        * A mention of our node plays the mention sound. Other messages play the sound of
+          their kind: a DM, a channel message, or a room post.
+        * Each event has its own switch (refer to
+          :data:`~meshterm.services.sound.EVENT_PREFERENCE`). When the mention switch is
+          off, a mention plays the sound of its kind instead. When the switch of the kind is
+          off too, nothing plays.
 
         A failure here must never stop the recording of messages, so it only goes to the log.
         """
-        if key == self._active:
+        if key == self._active or muted:
             return
         sound = getattr(self._ctx, "sound", None)
         if sound is None:
             return
         try:
-            event = await self._sound_event(message, key, muted=muted)
-            if event is not None:
-                sound.notify(event)
+            if message.is_channel:
+                event = SoundEvent.CHANNEL_MESSAGE
+            elif message.is_post:
+                event = SoundEvent.ROOM_POST
+            else:
+                event = SoundEvent.DIRECT_MESSAGE
+            if sound.event_on(SoundEvent.MENTION) and await self._mentions_us(message.text):
+                event = SoundEvent.MENTION
+            sound.notify(event)
         except Exception as exc:  # noqa: BLE001 - a sound must never stop the recorder
             self._ctx.log.debug("chat: sound failed: %s", exc)
-
-    async def _sound_event(
-        self, message: Message, key: str, *, muted: bool = False
-    ) -> SoundEvent | None:
-        """The sound event of a received message, or ``None`` for no sound."""
-        prefs = self._ctx.preferences
-        mention = await self._mentions_us(message.text)
-        if mention and prefs.mention_sound_always:
-            return SoundEvent.MENTION
-        if message.is_channel:
-            if muted:
-                return None
-            when, event = prefs.channel_sound, SoundEvent.CHANNEL_MESSAGE
-        else:
-            kind, event = (
-                ("room_sound", SoundEvent.ROOM_POST)
-                if message.is_post
-                else ("dm_sound", SoundEvent.DIRECT_MESSAGE)
-            )
-            store = getattr(self._ctx, "sound_store", None)
-            when = (store.get(key) if store is not None else None) or getattr(prefs, kind)
-        if when == "off":
-            return None
-        if mention:
-            return SoundEvent.MENTION
-        return event if when == "all" else None
 
     async def _mentions_us(self, text: str | None) -> bool:
         """Whether a message text mentions our node (``@[Name]`` with the name of our node)."""
