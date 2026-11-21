@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from rich.cells import cell_len
@@ -2774,6 +2775,142 @@ async def test_badge_still_respects_a_muted_channel(tmp_path: Path, repo: Reposi
         await _record(chat, ctx, Message(text="Ann: hey", channel=0, is_channel=True))
         assert chat.unread(f"chan:{public}") == 0
         assert repo.recent_chat_messages(is_channel=True, channel_id=public)
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+# -- the sound of a received message -------------------------------------------------
+
+
+async def _sound_chat(repo: Repository, tmp_path: Path, **prefs: object):
+    """A chat service on the mock device with Public on slot 0, and a list of sound events."""
+    from meshterm.core.sound_store import SoundStore
+
+    device = MockDevice()
+    await device.connect()
+    device._channels[0] = {
+        "channel_idx": 0,
+        "channel_name": "Public",
+        "channel_secret": DEFAULT_PUBLIC_SECRET,
+    }
+    ctx = _GatedContext(device, repo)
+    ctx.preferences = Preferences(values=prefs)
+    ctx.sound_store = SoundStore(tmp_path / "sounds.json")
+    events: list = []
+    ctx.sound = SimpleNamespace(notify=events.append)
+    chat = ChatService(ctx)
+    await chat.start()
+    return device, ctx, chat, events
+
+
+def _public_key() -> str:
+    from meshterm.core.channels import channel_identity
+
+    return f"chan:{channel_identity('Public', DEFAULT_PUBLIC_SECRET)}"
+
+
+async def test_sound_a_dm_plays_by_default(tmp_path: Path, repo: Repository) -> None:
+    """A DM plays its sound by default (``dm_sound`` is ``all``)."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        await _record(chat, ctx, Message(text="hello", sender="d4e5f6a7"))
+        assert events == [SoundEvent.DIRECT_MESSAGE]
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_a_channel_plays_only_for_a_mention_by_default(
+    tmp_path: Path, repo: Repository
+) -> None:
+    """A channel plays nothing for a plain message, and the mention sound for a mention."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        await _record(chat, ctx, Message(text="Ann: hey all", channel=0, is_channel=True))
+        assert events == []
+        text = "Ann: hey @[MockCompanion]"
+        await _record(chat, ctx, Message(text=text, channel=0, is_channel=True))
+        assert events == [SoundEvent.MENTION]
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_the_setting_of_a_conversation_wins(tmp_path: Path, repo: Repository) -> None:
+    """The setting of one channel replaces the default of its kind: ``all``, then ``off``."""
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        ctx.sound_store.set(_public_key(), "all")
+        await _record(chat, ctx, Message(text="Ann: hey", channel=0, is_channel=True))
+        assert events == [SoundEvent.CHANNEL_MESSAGE]
+        ctx.sound_store.set(_public_key(), "off")
+        text = "Ann: @[MockCompanion] hi"
+        await _record(chat, ctx, Message(text=text, channel=0, is_channel=True))
+        assert events == [SoundEvent.CHANNEL_MESSAGE]  # off: not even a mention
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_the_default_of_a_kind_is_a_preference(
+    tmp_path: Path, repo: Repository
+) -> None:
+    """``dm_sound = off`` silences each DM that has no setting of its own."""
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path, dm_sound="off")
+    try:
+        await _record(chat, ctx, Message(text="hello", sender="d4e5f6a7"))
+        assert events == []
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_the_open_conversation_is_silent(tmp_path: Path, repo: Repository) -> None:
+    """The conversation on the screen plays nothing, the same as its unread count."""
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        chat.set_active("dm:d4e5f6a7")
+        await _record(chat, ctx, Message(text="hello", sender="d4e5f6a7"))
+        assert events == []
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_a_muted_channel_still_plays_a_mention(
+    tmp_path: Path, repo: Repository
+) -> None:
+    """The mute stops the unread count, not the sound (JP, 2026-11-20)."""
+    from meshterm.core.channels import channel_identity
+    from meshterm.core.mute_store import MuteStore
+    from meshterm.services.sound import SoundEvent
+
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        ctx.mute_store = MuteStore(tmp_path / "mutes.json")
+        ctx.mute_store.set_muted(channel_identity("Public", DEFAULT_PUBLIC_SECRET), True)
+        text = "Ann: @[MockCompanion] look"
+        await _record(chat, ctx, Message(text=text, channel=0, is_channel=True))
+        assert chat.unread(_public_key()) == 0
+        assert events == [SoundEvent.MENTION]
+    finally:
+        await chat.stop()
+        await device.disconnect()
+
+
+async def test_sound_a_conversation_with_no_row_is_silent(tmp_path: Path, repo: Repository) -> None:
+    """A message that the Chat picker cannot list (a repeater reply) plays nothing."""
+    device, ctx, chat, events = await _sound_chat(repo, tmp_path)
+    try:
+        await _record(chat, ctx, Message(text="> ok", sender="a1b2c3d4"))
+        assert events == []
     finally:
         await chat.stop()
         await device.disconnect()

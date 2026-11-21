@@ -23,7 +23,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ..core.channels import channel_identity
+from ..core.channels import MENTION, channel_identity
 from ..core.connection import Unsubscribe
 from ..core.events import EventKind, MeshEvent
 from ..core.models import (
@@ -36,6 +36,7 @@ from ..core.models import (
 )
 from ..core.regions import WILDCARD, normalize
 from .arrival_backfill import backfill_arrivals
+from .sound import SoundEvent
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -380,8 +381,11 @@ class ChatService:
                 channel_id = (
                     await self.channel_id_for(message.channel) if message.is_channel else None
                 )
-                notify = await self._notifies(message, channel_id)
-                self._store_inbound(run_id, message, channel_id, notify=notify)
+                listed = await self._is_listed(message, channel_id)
+                notify = listed and not self._is_muted(message, channel_id)
+                chat = self._store_inbound(run_id, message, channel_id, notify=notify)
+                if listed:
+                    await self._play_sound(message, chat.key)
             except Exception as exc:  # noqa: BLE001 - one bad message must not stop the worker
                 self._ctx.log.debug("chat: failed to record message: %s", exc)
             finally:
@@ -394,7 +398,7 @@ class ChatService:
         channel_id: str | None,
         *,
         notify: bool = True,
-    ) -> None:
+    ) -> ChatMessage:
         """Store an inbound message under a resolved identity, and increase its unread count.
 
         MeshTerm always stores the transcript. It does not increase the unread count for
@@ -403,6 +407,9 @@ class ChatService:
         that the Chat picker cannot list (refer to :meth:`_notifies`). A message that does
         not notify is still written to history. Thus when the user opens its conversation
         later, the conversation shows all messages.
+
+        Returns:
+            The stored message.
         """
         chat = ChatMessage.from_message(message, channel_id=channel_id)
         self._session_count += 1
@@ -412,6 +419,7 @@ class ChatService:
             self._ctx.repo.record_chat_message(chat, run_id=run_id)
         except Exception as exc:  # noqa: BLE001 - the storage must never break the subscription
             self._ctx.log.debug("chat: failed to record message: %s", exc)
+        return chat
 
     async def _notifies(self, message: Message, channel_id: str | None) -> bool:
         """Whether this message increases the unread badge in the header: the only badge rule.
@@ -452,12 +460,87 @@ class ChatService:
         Returns:
             ``True`` to increase the unread count of the conversation.
         """
+        if self._is_muted(message, channel_id):
+            return False
+        return await self._is_listed(message, channel_id)
+
+    def _is_muted(self, message: Message, channel_id: str | None) -> bool:
+        """Whether the message is on a channel that the user muted (refer to MuteStore)."""
+        if not message.is_channel:
+            return False
+        store = getattr(self._ctx, "mute_store", None)
+        return store is not None and store.is_muted(channel_id)
+
+    async def _is_listed(self, message: Message, channel_id: str | None) -> bool:
+        """Whether the Chat picker lists the conversation of the message (refer to _notifies).
+
+        The unread badge and the sound both use this rule. A message that has no row to open
+        makes no sound, for the same reason that it does not increase the badge.
+        """
         if message.is_channel:
-            store = getattr(self._ctx, "mute_store", None)
-            if store is not None and store.is_muted(channel_id):
-                return False
             return await self._is_listed_channel(channel_id)
         return await self._is_listed_contact(message.sender, post=message.is_post)
+
+    async def _play_sound(self, message: Message, key: str) -> None:
+        """Play the sound of a received message, if its conversation wants one.
+
+        The rule (JP, 2026-11-20):
+
+        * The open conversation makes no sound, the same as its unread count: the user
+          already sees the message.
+        * Each conversation has a sound setting (refer to
+          :class:`~meshterm.core.sound_store.SoundStore`), or follows the default of its
+          kind (the ``channel_sound``, ``dm_sound``, and ``room_sound`` preferences).
+        * ``off`` plays nothing. Otherwise a mention of our node plays the mention sound.
+          ``all`` plays the sound of the kind for each other message, and ``mentions``
+          plays nothing for it.
+
+        The channel mute is not part of this rule. It stops the unread count, not the sound.
+        A failure here must never stop the recording of messages, so it only goes to the log.
+        """
+        if key == self._active:
+            return
+        sound = getattr(self._ctx, "sound", None)
+        if sound is None:
+            return
+        try:
+            event = await self._sound_event(message, key)
+            if event is not None:
+                sound.notify(event)
+        except Exception as exc:  # noqa: BLE001 - a sound must never stop the recorder
+            self._ctx.log.debug("chat: sound failed: %s", exc)
+
+    async def _sound_event(self, message: Message, key: str) -> SoundEvent | None:
+        """The sound event of a received message, or ``None`` for no sound."""
+        if message.is_channel:
+            kind, event = "channel_sound", SoundEvent.CHANNEL_MESSAGE
+        elif message.is_post:
+            kind, event = "room_sound", SoundEvent.ROOM_POST
+        else:
+            kind, event = "dm_sound", SoundEvent.DIRECT_MESSAGE
+        store = getattr(self._ctx, "sound_store", None)
+        when = (store.get(key) if store is not None else None) or getattr(
+            self._ctx.preferences, kind
+        )
+        if when == "off":
+            return None
+        if await self._mentions_us(message.text):
+            return SoundEvent.MENTION
+        return event if when == "all" else None
+
+    async def _mentions_us(self, text: str | None) -> bool:
+        """Whether a message text mentions our node (``@[Name]`` with the name of our node)."""
+        if not text or "@[" not in text:
+            return False
+        devstate = getattr(self._ctx, "devstate", None)
+        if devstate is None:
+            return False
+        try:
+            info = await devstate.self_info()
+        except Exception:  # noqa: BLE001 - with no name, nothing is a mention of us
+            return False
+        name = str(info.get("name") or "")
+        return bool(name) and any(m.group(1) == name for m in MENTION.finditer(text))
 
     async def _is_listed_channel(self, channel_id: str | None) -> bool:
         """Whether a channel identity is one of the configured channel slots of the device.
