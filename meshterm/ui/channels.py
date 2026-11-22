@@ -77,6 +77,7 @@ from ..core.channel_file import (
 )
 from ..core.channel_probe import ChannelSlot, probe_channel_slots
 from ..core.channels import (
+    DEFAULT_PUBLIC_NAME,
     DEFAULT_PUBLIC_SECRET,
     MAX_CHANNELS,
     derive_secret,
@@ -1181,23 +1182,85 @@ async def _add_default_public(
     return 1
 
 
-async def _add_public(
-    ctx: AppContext, device: Device, slots: list[ChannelSlot], capacity: int
-) -> int:
-    """Create a public channel. The key comes from its name, which starts with ``#``."""
-    idx = await _pick_free_slot(ctx, device, slots, capacity)
-    if idx is None:
-        return 0
+async def _ask_public_name(ctx: AppContext, slots: list[ChannelSlot]) -> tuple[str, bool] | None:
+    """Ask for the name of a public channel, and ask again when the name says ``Public``.
+
+    The built-in Public channel of MeshCore has a fixed key that does not come from its name
+    (:data:`~meshterm.core.channels.DEFAULT_PUBLIC_SECRET`). Thus ``#Public`` is **not** that
+    channel. Its key comes from its name, its hash is different, and no other node is on it.
+    But the two rows that add a channel are beside each other in the menu, and ``Public`` is
+    the obvious word to type for the name of a public channel. A user who did this got a
+    channel that looked correct, that sent with no error, and that nobody heard.
+
+    Thus this name gets a question. The question does not refuse the name: a user who wants
+    ``#Public`` can have it. It offers the standard channel instead, which is what the user
+    almost always wanted, and it says where that channel already is when a slot has it.
+
+    Args:
+        ctx: The shared application context.
+        slots: The slots as they were last read, to find the standard Public channel.
+
+    Returns:
+        The name to write, and whether the name derives the key (``False`` for the standard
+        Public channel, which carries its own fixed key). ``None`` if the user cancelled.
+    """
     raw = await ctx.ui.text(
         "Public channel name:",
         help_text="A leading # is added automatically; the key is derived from the name",
         validate=_nonblank,
     )
     if not raw:
-        return 0
+        return None
     name = raw.strip()
     if not name.startswith("#"):
         name = f"#{name}"
+    if name.lstrip("#").casefold() != DEFAULT_PUBLIC_NAME:
+        return name, True
+    warning = (
+        f"{name} is not the standard Public channel. Its key comes from its name, "
+        "so no other node is on that channel."
+    )
+    here = next((slot for slot in slots if slot.secret == DEFAULT_PUBLIC_SECRET), None)
+    if here is not None:  # nothing to offer: the real channel is already on the device
+        answer = await ctx.ui.dialog(
+            Text(f"{warning} The standard Public is already on slot {here.idx}.", style="warn"),
+            [("Cancel", None), (name, "named")],
+            title="Not the standard Public",
+            default=1,
+            danger=True,
+        )
+        return (name, True) if answer == "named" else None
+    answer = await ctx.ui.dialog(
+        Text(f"{warning} The standard Public channel has one fixed key.", style="warn"),
+        [("Cancel", None), (name, "named"), ("Standard", "standard")],
+        title="Not the standard Public",
+        default=2,
+        danger=True,
+    )
+    if answer == "standard":
+        return "Public", False
+    return (name, True) if answer == "named" else None
+
+
+async def _add_public(
+    ctx: AppContext, device: Device, slots: list[ChannelSlot], capacity: int
+) -> int:
+    """Create a public channel. The key comes from its name, which starts with ``#``.
+
+    The name ``Public`` is the one name that asks again, because it names another channel
+    than the one that the user means (refer to :func:`_ask_public_name`). The answer can
+    write the standard Public channel on the slot instead.
+    """
+    idx = await _pick_free_slot(ctx, device, slots, capacity)
+    if idx is None:
+        return 0
+    chosen = await _ask_public_name(ctx, slots)
+    if chosen is None:
+        return 0
+    name, derived = chosen
+    if not derived:  # the standard Public channel, which carries its own well-known key
+        await write_channel(ctx, device, idx, name, DEFAULT_PUBLIC_SECRET)
+        return 1
     secret = derive_secret(name)  # what the firmware will calculate. It is for the QR and share
     await write_channel(ctx, device, idx, name, None)  # None: the firmware derives the key
     await _show_share(ctx, name, secret)

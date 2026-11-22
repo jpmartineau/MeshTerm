@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -4116,6 +4117,17 @@ def test_a_sender_with_no_key_opens_trace_target_under_its_name(monkeypatch) -> 
 # -- the Public offer (issue #36) ---------------------------------------------
 
 
+@asynccontextmanager
+async def _nothing():
+    """A busy dialog that draws nothing, for the fake UI of the offer tests."""
+    yield
+
+
+async def _empty_slot(_idx: int) -> dict:
+    """A slot read that proves the slot is free."""
+    return {}
+
+
 def test_picker_offers_public_when_the_device_has_none() -> None:
     """With no Public on the device, the picker offers it on slot 0, as a row that is not on it."""
     from meshterm.core.channel_probe import ChannelSlot
@@ -4125,6 +4137,34 @@ def test_picker_offers_public_when_the_device_has_none() -> None:
     assert offer.label == "Public" and offer.channel_idx == 0 and not offer.on_device
     other = ChannelSlot(1, "#test", derive_secret("#test"))
     assert [c.on_device for c in _channels_from_slots([other])] == [False, True]
+
+
+def test_picker_offers_public_when_another_channel_holds_slot_zero() -> None:
+    """A full slot 0 does not hide the offer. The key of the channel decides, not the slot.
+
+    A user who made ``#Public`` by mistake (a different channel, whose key comes from its
+    name) filled slot 0 with it. The offer then disappeared, which hid the one way back to
+    the real channel.
+    """
+    from meshterm.core.channel_probe import ChannelSlot
+    from meshterm.tools.chat import _channels_from_slots
+
+    wrong = ChannelSlot(0, "#Public", derive_secret("#Public"))
+    rows = _channels_from_slots([wrong])
+    assert [(c.label, c.channel_idx, c.on_device) for c in rows] == [
+        ("Public", 1, False),  # the offer, on the lowest free slot
+        ("#Public", 0, True),
+    ]
+
+
+def test_picker_has_no_offer_when_each_slot_is_full() -> None:
+    """With no free slot, the offer has nowhere to go, so the picker does not show it."""
+    from meshterm.core.channel_probe import ChannelSlot
+    from meshterm.core.channels import MAX_CHANNELS
+    from meshterm.tools.chat import _channels_from_slots
+
+    full = [ChannelSlot(i, f"#c{i}", derive_secret(f"#c{i}")) for i in range(MAX_CHANNELS)]
+    assert all(c.on_device for c in _channels_from_slots(full))
 
 
 def test_picker_has_no_offer_when_public_is_on_the_device() -> None:
@@ -4151,10 +4191,17 @@ class _OfferUi:
     def __init__(self, answer) -> None:
         self.answer = answer
         self.asked: list[str] = []
+        self.session = None
 
     async def dialog(self, prompt, buttons, **_kw):
         self.asked.append(prompt)
         return self.answer
+
+    def busy_dialog(self, *_a, **_kw):
+        return _nothing()
+
+    def note(self, *_a, **_kw) -> None:
+        return None
 
 
 class _OfferDevstate:
@@ -4163,6 +4210,9 @@ class _OfferDevstate:
 
     async def channel_slots(self):
         return list(self.slots)
+
+    async def channel_capacity(self):
+        return 8
 
 
 def _offer_ctx(answer, monkeypatch: pytest.MonkeyPatch):
@@ -4180,7 +4230,9 @@ def _offer_ctx(answer, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("meshterm.ui.channels.write_channel", write_channel)
 
     async def device():
-        return object()
+        # _pick_free_slot reads the slot one more time before it writes. An empty answer
+        # proves that the slot is free.
+        return SimpleNamespace(get_channel=_empty_slot)
 
     ctx = SimpleNamespace(ui=_OfferUi(answer), devstate=devstate, device=device)
     return ctx, writes
