@@ -166,7 +166,9 @@ class ContactsScreen(ContactListScreen):
         self._managed = managed
         self._contacts, self._counts = contacts, counts
         rows = self._contact_rows_for(locked)
-        # The maintenance actions close the list, after each contact, for each sort. First
+        # The maintenance actions close the list, after each contact, for each sort. A typed
+        # filter narrows the contacts and keeps these two rows (Choice.always_shown): the
+        # filter searches the list, and the actions of the page are not in it. First
         # a blank spacer, then the sweep (it has a `…` because it opens more prompts), then
         # the way to what the sweep already took. The two rows are together because they are
         # the two halves of one idea. The archived row is *under* the sweep for the same
@@ -183,6 +185,7 @@ class ContactsScreen(ContactListScreen):
                 Choice(
                     title=marked_label("💾", "Archive contacts…", "", lane=lane),
                     value=_ARCHIVE,
+                    always_shown=True,
                 ),
             ]
         if archived:
@@ -191,7 +194,7 @@ class ContactsScreen(ContactListScreen):
             # of the verb. It is what the row leads to, not what the row does.
             label = marked_label("📂", "View archived contacts", "", lane=lane)
             label.append(f"  ·  {archived}", style="muted")
-            tail.append(Choice(title=label, value=_ARCHIVED))
+            tail.append(Choice(title=label, value=_ARCHIVED, always_shown=True))
         # The title counts both halves of the contacts of this device: those that are on it
         # and those that a sweep moved off it. If the frame is too narrow for the words, the
         # numbers stay and the words go (``Contacts · 198 + 123``).

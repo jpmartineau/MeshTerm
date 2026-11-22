@@ -1246,16 +1246,20 @@ async def open_records(ctx: AppContext) -> dict:
                 )
         if total:
             items.append(Separator(" "))
+            # The records are the data of the page. Thus a typed filter narrows them and
+            # keeps these two rows (Choice.always_shown).
             items.append(
                 Choice(
                     title=marked_label("🗑", "Delete a discipline's records…", "err"),
                     value=("del_cat", None, 0, None),
+                    always_shown=True,
                 )
             )
             items.append(
                 Choice(
                     title=marked_label("🗑", "Delete all records…", "err"),
                     value=("del_all", None, 0, None),
+                    always_shown=True,
                 )
             )
         return items

@@ -1503,7 +1503,13 @@ class TimeMachinePickerScreen(ContactListScreen):
             sort=sort,
             prompt=prompt,
             lead=[
-                Choice(command_label("🌐 The whole mesh — days, arrivals, the ledger"), MESH),
+                # The nodes are the data of the picker. Thus a typed filter narrows them
+                # and keeps this row (Choice.always_shown).
+                Choice(
+                    command_label("🌐 The whole mesh — days, arrivals, the ledger"),
+                    MESH,
+                    always_shown=True,
+                ),
                 section_heading("Nodes"),
             ],
         )

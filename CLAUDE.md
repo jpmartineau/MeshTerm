@@ -226,12 +226,7 @@ deliberately, one at a time, and say why in the code.
   clean and, once changes are staged, one blank `Separator(" ")` line then
   `✓ Apply n staged changes` over `✗ Back — discard staged changes` — Apply has no key of
   its own, so it needs a visible counterpart naming what the other way out costs. Same
-  shape in `ReorderScreen`. **A filter never hides a way out**: the pair carries
-  `Choice.always_shown`, so a typed query narrows the content and leaves Apply and the
-  Back that names its cost (JP, 2026-11-22) — a filter that hid Apply put the only way to
-  commit behind an Esc nobody knew to press. Same flag on the live-then-save pair and the
-  sweep's Archive/Back; a verb row a reader *searches for* (an Actions section, a menu) is
-  content and filters like any row. A **Quit** row is likewise kept (main menu, device splash):
+  shape in `ReorderScreen`. A **Quit** row is likewise kept (main menu, device splash):
   it *initiates* the app's terminal action behind a confirm, and on the splash it is the
   only statement that the app can be left at all.
 - **An editor has one of two shapes, chosen by who holds the change.** Where MeshTerm
@@ -246,6 +241,18 @@ deliberately, one at a time, and say why in the code.
   holds live: the edits depend on each other there (a region must exist before it can be
   allowed), and a stage would have to re-implement the firmware's rules to order them.
   `ui/region_editor.py` is the reference.
+- **A filter never hides what a page does** (JP, 2026-11-22). Find-as-you-type searches a
+  list's **data** — the contacts, the settings, the channel slots, the queued messages, the
+  records, the alerts, the regions, the paths — and a row that *acts on the page* is not
+  data: the `✓ Apply`/`✗ Back` pair, a live page's Save pair, an **Actions** section, an Add
+  or New row, a bulk action, a maintenance row (Contacts' `Archive contacts…` and
+  `View archived contacts`), a way out of a result list. Those rows carry
+  `Choice.always_shown` (`menus.menu_rows(…, always_shown=True)` for a whole section), and
+  `SelectScreen._rows` keeps them exactly as it keeps a separator. A filter that hid them
+  left Apply, which has no key of its own, reachable only by an Esc that nothing on the
+  screen named. The other side of the rule: a list that **is** a menu — the main menu, one
+  room's actions, a path's actions, the startup offer — filters every row, because there the
+  verbs are the content and the query is how the reader finds one.
 - **A cursor clamps at both ends — nothing in the app rolls over.** ↓ off the last row
   and ↑ off the first stay put, in a select list, a hand-drawn action list, a reorder
   list, a dialog's button row, everywhere. The window follows the highlight, so a roll

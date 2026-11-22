@@ -211,28 +211,40 @@ def _menu_items(
     # toggle for new nodes below them. The set of icons is declared whole and not found from
     # the rows that are present. Thus the column does not move when the conditional rows
     # appear and disappear. It is empty where the platform draws no icons.
+    # The alerts and the watched nodes are the data of the page, so each action row below
+    # declares that a typed filter keeps it (Choice.always_shown).
     lane = icon_lane(("✓", "🗑", "⭐", "🔔"))
     unacked = sum(1 for a in alerts if not a.acked)
     acked = len(alerts) - unacked
     if unacked:
         ack_all = marked_label("✓", f"Acknowledge all ({unacked})", "ok", lane=lane)
-        items.append(Choice(ack_all, _ACK_ALL))
+        items.append(Choice(ack_all, _ACK_ALL, always_shown=True))
     if acked:
-        items.append(Choice(marked_label("🗑", "Clear acknowledged", "err", lane=lane), _CLEAR))
+        items.append(
+            Choice(
+                marked_label("🗑", "Clear acknowledged", "err", lane=lane),
+                _CLEAR,
+                always_shown=True,
+            )
+        )
 
     items.append(section_heading("Watched nodes"))
     if not watched:
         items.append(Separator("  none starred yet — silence and SNR rules need one"))
     for key in sorted(watched, key=lambda k: watched[k].name.casefold()):
         items.append(Choice(_watched_row(watched[key], type_of), ("node", key)))
-    items.append(Choice(marked_label("⭐", "Watch a node…", "", lane=lane), _WATCH))
+    items.append(
+        Choice(marked_label("⭐", "Watch a node…", "", lane=lane), _WATCH, always_shown=True)
+    )
 
     items.append(Separator(" "))
     state = "[ok]on[/ok]" if new_node_alerts else "[muted]off[/muted]"
     toggle = Text.from_markup(
         f"New-node alerts: {state}  [muted]— announce first-ever appearances[/muted]"
     )
-    items.append(Choice(Text.assemble(icon_mark("🔔", "", lane), toggle), _TOGGLE_NEW))
+    items.append(
+        Choice(Text.assemble(icon_mark("🔔", "", lane), toggle), _TOGGLE_NEW, always_shown=True)
+    )
 
     return items
 

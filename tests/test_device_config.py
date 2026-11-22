@@ -1370,6 +1370,30 @@ def test_contacts_screen_tail_offers_archive_only_when_populated() -> None:
     assert _ARCHIVE not in values  # nothing to archive, so no action row
 
 
+def test_a_filter_on_the_contacts_narrows_them_and_keeps_the_archive_rows() -> None:
+    """A typed query hides the contacts that do not match. The two tail rows stay.
+
+    The contacts are the data of the list. What the page *does* is not in the query, so a
+    filter that hid the actions left them unreachable until the user cleared it.
+    """
+    from meshterm.core.models import Contact
+    from meshterm.ui.contacts_screen import _ARCHIVE, _ARCHIVED, ContactsScreen
+
+    screen = ContactsScreen(
+        "Us",
+        "cc" * 32,
+        [Contact(name="Alice", public_key="aa" * 32)],
+        1,
+        {},
+        _contacts_sort(),
+        archived=2,
+    )
+    screen.note_viewport(20)
+    for ch in "zzzz":  # a query that no contact matches
+        screen.handle("text", ch)
+    assert [c.value for c in screen._choices()] == [_ARCHIVE, _ARCHIVED]
+
+
 def test_the_archived_row_appears_only_when_something_is_archived() -> None:
     """The row for the archived list, with its count, shows only when there is an archived list.
 

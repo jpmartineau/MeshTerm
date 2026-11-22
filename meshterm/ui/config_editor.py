@@ -682,14 +682,19 @@ def _menu_items(
     ]
     lane = icon_lane(icon for icon, _, _, _ in actions)
     items.append(section_heading("Actions"))
+    # The settings are the data of the page, so a typed filter narrows them and keeps each
+    # action (Choice.always_shown).
     items.extend(
         menu_rows(
             (
-                marked_label(icon, label, "err" if value == _RESET else "", lane=lane),
-                help_text,
-                value,
-            )
-            for icon, label, help_text, value in actions
+                (
+                    marked_label(icon, label, "err" if value == _RESET else "", lane=lane),
+                    help_text,
+                    value,
+                )
+                for icon, label, help_text, value in actions
+            ),
+            always_shown=True,
         )
     )
 

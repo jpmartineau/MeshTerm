@@ -318,7 +318,7 @@ def exit_rows(staged: int, *, apply_value: Any, back_value: Any) -> list:
     ]
 
 
-def menu_rows(rows: Iterable[tuple[str | Text, str, Any]]) -> list:
+def menu_rows(rows: Iterable[tuple[str | Text, str, Any]], *, always_shown: bool = False) -> list:
     """:class:`Choice` rows with a label and a description, in two aligned lanes.
 
     This is the menu form that the channel detail and the Actions of the Device config and
@@ -340,6 +340,14 @@ def menu_rows(rows: Iterable[tuple[str | Text, str, Any]]) -> list:
     Args:
         rows: ``(label, description, value)`` triples. A :class:`Text` label keeps its
             own styling (a destructive row with the ``err`` tint, a live unread badge).
+        always_shown: Whether a typed filter keeps these rows
+            (:attr:`~meshterm.ui.tui.select.Choice.always_shown`). Set it where the rows
+            are the **actions of a page whose other rows are data**: the Actions section
+            of an editor, the Add row of a list. There the filter searches the data, and an
+            action that it hid was gone until the user cleared a query that nothing names.
+            Leave it off for a list that *is* a menu (the main menu, the actions of one
+            room): there the rows are the content, and the filter is how the user finds
+            one.
 
     Returns:
         One :class:`Choice` for each row, with the lanes aligned across all the rows.
@@ -360,7 +368,9 @@ def menu_rows(rows: Iterable[tuple[str | Text, str, Any]]) -> list:
         # The label lane identifies the row. Only the description overflows, so the
         # h-scroll moves only the description, and the name does not move (refer to
         # Choice.hscroll_from).
-        items.append(Choice(title=row, value=value, hscroll_from=width + 2))
+        items.append(
+            Choice(title=row, value=value, hscroll_from=width + 2, always_shown=always_shown)
+        )
     return items
 
 

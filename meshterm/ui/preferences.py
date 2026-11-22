@@ -298,6 +298,9 @@ def _menu_items(
                     title=lane_row(label, value, help_text, label_w, value_w),
                     value=key,
                     hscroll_from=description_at,
+                    # The preferences are the data of the page. The reset row is what the
+                    # page does, so a typed filter keeps it (Choice.always_shown).
+                    always_shown=key == _RESET,
                 )
             )
             if key == _WEEKLY_ADVERT and _effective(prefs, key, pending):

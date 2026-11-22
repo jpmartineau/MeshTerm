@@ -242,10 +242,15 @@ def region_items(node: Contact, table: RegionTable, unsaved: int) -> tuple[str, 
     # list adds no second line after it (Separator.spaced).
     items.append(Separator(" "))
     items.append(section_heading("Actions"))
+    # The region table is the data of the page, so a typed filter narrows it and keeps each
+    # action (Choice.always_shown).
     items.extend(
         menu_rows(
-            (marked_label(icon, label, "", lane=lane), help_text, value)
-            for icon, label, help_text, value in actions
+            (
+                (marked_label(icon, label, "", lane=lane), help_text, value)
+                for icon, label, help_text, value in actions
+            ),
+            always_shown=True,
         )
     )
     items.extend(_save_rows(unsaved))

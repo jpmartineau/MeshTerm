@@ -642,9 +642,7 @@ class SelectScreen(Screen):
         return [
             it
             for it in self._items
-            if isinstance(it, Separator)
-            or it.always_shown
-            or needle in _plain(it.label).lower()
+            if isinstance(it, Separator) or it.always_shown or needle in _plain(it.label).lower()
         ]
 
     def _choices(self, rows: list | None = None) -> list:

@@ -385,7 +385,11 @@ def clock_drift_screen(rows: Sequence[ClockRow], *, tolerance_s: float) -> Selec
         if due:
             label = marked_label("🕒", "Sync their clocks…", "")
             label.append(f"  ·  {len(due)} {'node' if len(due) == 1 else 'nodes'}", "muted")
-            items += [Separator(" "), Choice(title=label, value=SYNC_ALL), Separator(" ")]
+            items += [
+                Separator(" "),
+                Choice(title=label, value=SYNC_ALL, always_shown=True),
+                Separator(" "),
+            ]
 
     others = _by_size([r for r in off if not r.managed and r.contact is not None])
     items.append(section_heading("Out of sync"))

@@ -318,7 +318,9 @@ def _action_rows(status: RouteStatus, proven: ProvenRoute | None = None) -> list
     if status.hops is not None:
         rows.append(("Forget the route", "the next message floods", _FORGET))
     rows.append(("Discover routes…", "one flood: the route each way", _DISCOVER))
-    return menu_rows(rows)
+    # The rows above these say what the radio holds, which is the data of the popup. Thus a
+    # typed filter narrows that and keeps what the popup does.
+    return menu_rows(rows, always_shown=True)
 
 
 def _scenario_tag(scenario: PathScenario) -> str:
@@ -357,7 +359,7 @@ def _picker_rows(env: RouteEnv, status: RouteStatus) -> list[Any]:
         if scenario.source != "direct":
             add(tuple(scenario.hops), _scenario_tag(scenario))
     add((), "no relays: the contact is a neighbour")
-    rows.extend(menu_rows([("Compose…", "choose each hop yourself", _COMPOSE)]))
+    rows.extend(menu_rows([("Compose…", "choose each hop yourself", _COMPOSE)], always_shown=True))
     return rows
 
 

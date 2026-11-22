@@ -415,7 +415,11 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
             )
         )
     items.append(Separator(" "))  # put space between the action and the outbox rows above it
-    items.append(Choice(marked_label("📨", "Queue a message…", "", lane=lane), _QUEUE))
+    items.append(
+        # The queued messages are the data of the page, so a typed filter keeps this row
+        # and the Clear row below (Choice.always_shown).
+        Choice(marked_label("📨", "Queue a message…", "", lane=lane), _QUEUE, always_shown=True)
+    )
 
     if done:
         items.append(section_heading("Finished"))
@@ -429,7 +433,9 @@ def _menu_items(ctx: AppContext, entries: list[QueuedMessage]) -> list:
                     pans=True,
                 )
             )
-        items.append(Choice(marked_label("🗑", "Clear finished", "", lane=lane), _CLEAR))
+        items.append(
+            Choice(marked_label("🗑", "Clear finished", "", lane=lane), _CLEAR, always_shown=True)
+        )
 
     return items
 

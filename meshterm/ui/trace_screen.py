@@ -2507,6 +2507,9 @@ async def _open_session(
             Choice(
                 title=marked_label("⚡", "Probe all — trace each path once and rank", "warn"),
                 value=("probe", None),
+                # The candidates are the data of the list, so a typed filter keeps this
+                # row (Choice.always_shown).
+                always_shown=True,
             )
         )
         picked = await session.run_screen(
@@ -2547,7 +2550,8 @@ async def _open_session(
                 )
             )
         result_items.append(Separator(" "))
-        result_items.append(Choice(title="Keep current path", value=None))  # the exit: no adoption
+        # The way out of the results, which a typed filter keeps (Choice.always_shown).
+        result_items.append(Choice(title="Keep current path", value=None, always_shown=True))
         adopted = await session.run_screen(
             SelectScreen(
                 f"Probe results — {target_label}",

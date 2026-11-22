@@ -364,8 +364,13 @@ def test_a_filter_narrows_the_settings_and_keeps_the_apply_and_back_rows() -> No
     assert not any("Map tiles" in row for row in rows)
     assert any("✓ Apply 1 staged change" in row for row in rows)
     assert any("✗ Back — discard staged changes" in row for row in rows)
-    # They are still rows that the highlight can reach, and not only drawn lines.
-    assert [choice.value for choice in screen._choices()] == ["__apply__", "__cancel__"]
+    # They are still rows that the highlight can reach, and not only drawn lines. The reset
+    # row is an action of the page too, so the filter keeps it with them.
+    assert [choice.value for choice in screen._choices()] == [
+        "__reset__",
+        "__apply__",
+        "__cancel__",
+    ]
 
 
 def test_a_long_value_is_capped_so_the_descriptions_keep_their_lane() -> None:

@@ -201,8 +201,11 @@ def _page(store: OutboundStore, env: _Env) -> tuple[str, str, list]:
         items.append(
             Separator("  no sites yet — a site holds the paths for where you are", style="muted")
         )
+    # The sites and the fixed devices are the data of this page. Thus a typed filter
+    # narrows them and keeps the rows that add one (Choice.always_shown).
     items += menu_rows(
-        [(marked_label("✎", "New site…", "", lane=lane), "Name it, then add its paths", _NEW)]
+        [(marked_label("✎", "New site…", "", lane=lane), "Name it, then add its paths", _NEW)],
+        always_shown=True,
     )
 
     items.append(section_heading("Fixed devices"))
@@ -220,7 +223,8 @@ def _page(store: OutboundStore, env: _Env) -> tuple[str, str, list]:
                     "It never moves: give it its own paths",
                     _FIX,
                 )
-            ]
+            ],
+            always_shown=True,
         )
     return "Outbound paths", prompt, items
 
@@ -427,7 +431,7 @@ def _site_actions(store: OutboundStore, name: str) -> list:
             _DELETE,
         )
     )
-    return [section_heading("Site"), *menu_rows(rows)]
+    return [section_heading("Site"), *menu_rows(rows, always_shown=True)]
 
 
 def _device_actions() -> list:
@@ -442,7 +446,8 @@ def _device_actions() -> list:
                     "Forget its paths: it follows the active site",
                     _UNFIX,
                 )
-            ]
+            ],
+            always_shown=True,
         ),
     ]
 
@@ -463,7 +468,8 @@ def _editor_items(env: _Env, staged: list[OutboundPath], owner: list, changes: i
                 "Compose it hop by hop",
                 _ADD,
             )
-        ]
+        ],
+        always_shown=True,
     )
     rows += owner
     rows += exit_rows(changes, apply_value=_APPLY, back_value=_BACK)

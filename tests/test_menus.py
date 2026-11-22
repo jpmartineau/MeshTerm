@@ -47,6 +47,37 @@ def test_exit_rows_staged_state_spells_out_the_consequence() -> None:
     assert back_row.title.plain == "✗ Back — discard staged changes"
 
 
+def test_a_filter_keeps_the_way_out_and_the_actions_of_a_page() -> None:
+    """A typed query narrows the data of a list and keeps the rows that act on the page.
+
+    The exit pair declares it, and so does each command row that a page builds with
+    ``always_shown``. Apply has no keyboard key of its own, so a filter that hid it left
+    the staged changes with no way to commit them.
+    """
+    from meshterm.ui.tui import Choice, SelectScreen
+
+    actions = menu_rows([("Read settings", "Ask the device again", "read")], always_shown=True)
+    items = [
+        Choice(title="Airtime budget", value="airtime"),
+        Choice(title="Radio preset", value="preset"),
+        *actions,
+        *exit_rows(2, apply_value="A", back_value="B"),
+    ]
+    screen = SelectScreen("Settings", items)
+    screen.note_viewport(len(items) + 4)
+    for ch in "zzzz":  # a query that no setting matches
+        screen.handle("text", ch)
+    assert [choice.value for choice in screen._choices()] == ["read", "A", "B"]
+
+    # A menu is a list of actions, and there the filter is how the user finds one. Thus the
+    # rows of a plain menu_rows call narrow as before.
+    menu = SelectScreen("Menu", menu_rows([("Map", "Where the nodes are", "map")]))
+    menu.note_viewport(8)
+    for ch in "zzzz":
+        menu.handle("text", ch)
+    assert menu._choices() == []
+
+
 def test_menu_rows_align_descriptions_in_display_cells() -> None:
     """Each description starts at the same cell column, also after a label with a wide emoji."""
     rows = menu_rows(

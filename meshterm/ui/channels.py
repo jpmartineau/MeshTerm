@@ -780,7 +780,7 @@ def _menu_items(
     if len(slots) > 1:
         items.append(section_heading("Organize"))
         reorder = marked_label("↕", "Reorder channels", "", lane=lane)
-        items.append(Choice(title=reorder, value=_REORDER))
+        items.append(Choice(title=reorder, value=_REORDER, always_shown=True))
 
     # Before "Add a channel", because that section ends early when each slot is full, and an
     # import still has work then: it puts the channels in the order of its file.
@@ -834,7 +834,9 @@ def _menu_items(
         )
     # One call for the rows of the two sections, so that their descriptions start in the same
     # column. Two calls aligned each section to its own widest label, four cells apart.
-    aligned = menu_rows(transfer + adds)
+    # The channel slots are the data of this page, and these rows are what the page does.
+    # Thus a typed filter narrows the slots and keeps each command (Choice.always_shown).
+    aligned = menu_rows(transfer + adds, always_shown=True)
     items.append(section_heading("Export and import"))
     items.extend(aligned[: len(transfer)])
     items.append(section_heading("Add a channel"))
