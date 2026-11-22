@@ -305,6 +305,20 @@ PREFERENCES: tuple[PrefSpec, ...] = (
         # meshterm.services.site_suggest.
         default=True,
     ),
+    PrefSpec(
+        key="public_on_empty_device",
+        label="Public on an empty radio",
+        help="Add the standard Public channel to a radio that has none",
+        group="Device",
+        value_type="bool",
+        # On: a radio with no channel at all cannot send anywhere (each send needs a slot),
+        # and a new user reads an empty Chat as "nobody is here". MeshTerm writes the
+        # channel that MeshCore itself ships, on slot 0 at startup, and says so. The write
+        # overwrites nothing, because the device had no channel. Off: nothing is written,
+        # and the Chat picker still offers Public on its own. Refer to
+        # meshterm.ui.public_default.
+        default=True,
+    ),
     # --- Sending -----------------------------------------------------------------
     PrefSpec(
         key="trace_cooldown_s",

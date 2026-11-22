@@ -1114,6 +1114,13 @@ async def _startup(ctx: AppContext) -> bool:
     from .settings_offer import offer_remembered_settings
 
     await offer_remembered_settings(ctx)
+    # A device with no channel at all cannot send anywhere. Give it the standard Public
+    # channel, and say so. This step runs last, so that the replay of the remembered
+    # channels (at connect) and the settings offer are both done, and a device that forgot
+    # its own channels has them back before this step counts them.
+    from .public_default import add_public_when_empty
+
+    await add_public_when_empty(ctx)
     return True
 
 

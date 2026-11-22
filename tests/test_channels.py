@@ -514,6 +514,8 @@ class _ScriptedUi:
         self._selects = list(selects)
         self._texts = list(texts)
         self._dialogs = list(dialogs)
+        self.asked: list[str] = []
+        self.notices: list[str] = []
 
     def show(self, *renderables) -> None:  # noqa: ANN002
         pass
@@ -557,7 +559,19 @@ class _ScriptedUi:
         danger: bool = False,
         destructive: bool = False,
     ):
+        self.asked.append(prompt.plain if hasattr(prompt, "plain") else str(prompt))
         return self._dialogs.pop(0)
+
+    async def notify_startup(  # noqa: ANN201
+        self,
+        renderable,  # noqa: ANN001
+        *,
+        title: str = "",
+        banner=None,  # noqa: ANN001
+        footnote: str | None = None,
+    ):
+        plain = renderable.plain if hasattr(renderable, "plain") else str(renderable)
+        self.notices.append(f"{title}: {plain}")
 
 
 async def test_recreating_a_slot_refiles_messages_to_the_new_channel(ctx: AppContext) -> None:
@@ -1361,3 +1375,191 @@ async def test_a_reorder_that_breaks_partway_says_so(ctx: AppContext) -> None:
     device.set_channel = flaky  # type: ignore[method-assign]
     assert await _reorder_channels(ctx, device, slots) == 0  # not counted as a complete reorder
     assert said and "reorder stopped partway" in said[0]
+
+
+# -- the name that says Public (the #Public trap) ------------------------------
+
+
+async def test_the_name_public_offers_the_standard_channel_instead(ctx: AppContext) -> None:
+    """``Public`` typed as a # name asks again, and the answer can write the real channel.
+
+    ``#Public`` is a different channel: its key comes from its name, so no other node is on
+    it. A user who made it by mistake had a channel that sent with no error and that nobody
+    heard.
+    """
+    from meshterm.ui.channels import _add_public
+
+    device = await ctx.device()
+    ctx.ui = _ScriptedUi(selects=[], texts=["Public"], dialogs=["standard"])
+    assert await _add_public(ctx, device, [], 8) == 1
+    (slot,) = await read_channel_slots(device)
+    assert (slot.idx, slot.name, slot.secret) == (0, "Public", DEFAULT_PUBLIC_SECRET)
+    assert ctx.ui.asked and "is not the standard Public channel" in ctx.ui.asked[0]
+
+
+async def test_the_name_public_can_still_be_used_on_purpose(ctx: AppContext) -> None:
+    """The question does not refuse the name. A user who wants ``#Public`` can have it."""
+    from meshterm.ui.channels import _add_public
+
+    device = await ctx.device()
+    ctx.ui = _ScriptedUi(selects=[], texts=["Public"], dialogs=["named"])
+    assert await _add_public(ctx, device, [], 8) == 1
+    (slot,) = await read_channel_slots(device)
+    assert slot.name == "#Public" and slot.secret != DEFAULT_PUBLIC_SECRET
+
+
+async def test_cancel_on_the_public_question_writes_nothing(ctx: AppContext) -> None:
+    """Cancel on the question leaves the slot as it was."""
+    from meshterm.ui.channels import _add_public
+
+    device = await ctx.device()
+    ctx.ui = _ScriptedUi(selects=[], texts=["#public"], dialogs=[None])
+    assert await _add_public(ctx, device, [], 8) == 0
+    assert await read_channel_slots(device) == []
+
+
+async def test_any_other_public_name_asks_nothing(ctx: AppContext) -> None:
+    """Only the one name that names the standard channel asks again.
+
+    The scripted UI has no dialog to give. Thus a question here would raise.
+    """
+    from meshterm.ui.channels import _add_public
+
+    device = await ctx.device()
+    ctx.ui = _ScriptedUi(selects=[], texts=["yul"], dialogs=[])
+    assert await _add_public(ctx, device, [], 8) == 1
+    (slot,) = await read_channel_slots(device)
+    assert slot.name == "#yul"
+
+
+async def test_the_question_says_where_the_standard_public_already_is(ctx: AppContext) -> None:
+    """With the real Public on the device, the question names its slot and offers no copy."""
+    from meshterm.ui.channels import _add_public
+
+    device = await ctx.device()
+    await device.set_channel(2, "Public", DEFAULT_PUBLIC_SECRET)
+    slots = list(await read_channel_slots(device))
+    ctx.ui = _ScriptedUi(selects=[], texts=["Public"], dialogs=[None])
+    assert await _add_public(ctx, device, slots, 8) == 0
+    assert "already on slot 2" in ctx.ui.asked[0]
+
+
+# -- the Public channel of a device that has none ------------------------------
+
+
+def _as_a_radio(ctx: AppContext) -> None:
+    """Let the startup step act, which it does not do on the simulator.
+
+    The step passes over ``--mock``, because that device starts with no channel at each
+    launch (refer to :mod:`meshterm.ui.public_default`). These tests are about a real radio
+    with no channel, and the simulator is what stands in for it.
+    """
+    ctx.mock = False
+
+
+async def test_a_device_with_no_channel_gets_public_at_startup(ctx: AppContext) -> None:
+    """A radio with no channel at all cannot send. MeshTerm gives it Public, and says so."""
+    from meshterm.ui.public_default import add_public_when_empty
+
+    await ctx.device()  # open the link, so that the step has one to use
+    _as_a_radio(ctx)
+    ctx.ui = _ScriptedUi(selects=[], texts=[], dialogs=[])
+    assert await add_public_when_empty(ctx) is True
+    (slot,) = await read_channel_slots(await ctx.device())
+    assert (slot.idx, slot.name, slot.secret) == (0, "Public", DEFAULT_PUBLIC_SECRET)
+    assert ctx.ui.notices and "Public channel added" in ctx.ui.notices[0]
+
+
+async def test_a_device_that_has_a_channel_is_left_alone(ctx: AppContext) -> None:
+    """One channel is enough. The step then reads slot 0 only, and writes nothing."""
+    from meshterm.ui.public_default import add_public_when_empty
+
+    device = await ctx.device()
+    await device.set_channel(0, "#yul", None)
+    reads: list[int] = []
+    real = device.get_channel
+
+    async def counted(idx: int):  # noqa: ANN202
+        reads.append(idx)
+        return await real(idx)
+
+    device.get_channel = counted  # type: ignore[method-assign]
+    _as_a_radio(ctx)
+    ctx.ui = _ScriptedUi(selects=[], texts=[], dialogs=[])
+    assert await add_public_when_empty(ctx) is False
+    assert reads == [0]  # one round trip, at each startup of a device with channels
+    assert ctx.ui.notices == []
+
+
+async def test_a_device_with_channels_above_slot_zero_is_left_alone(ctx: AppContext) -> None:
+    """An empty slot 0 is not an empty device. The step counts each slot before it writes."""
+    from meshterm.ui.public_default import add_public_when_empty
+
+    device = await ctx.device()
+    await device.set_channel(3, "#yul", None)
+    _as_a_radio(ctx)
+    ctx.ui = _ScriptedUi(selects=[], texts=[], dialogs=[])
+    assert await add_public_when_empty(ctx) is False
+    assert [s.idx for s in await read_channel_slots(device)] == [3]
+
+
+async def test_a_probe_that_did_not_finish_writes_nothing(ctx: AppContext) -> None:
+    """A read that failed proves nothing: an empty short list looks like an empty device."""
+    from meshterm.core.connection import DeviceCommandError
+    from meshterm.ui.public_default import add_public_when_empty
+
+    device = await ctx.device()
+    real = device.get_channel
+
+    async def flaky(idx: int):  # noqa: ANN202
+        if idx == 0:
+            return await real(idx)  # empty, and that much is true
+        raise DeviceCommandError("no reply in time")
+
+    device.get_channel = flaky  # type: ignore[method-assign]
+    _as_a_radio(ctx)
+    ctx.ui = _ScriptedUi(selects=[], texts=[], dialogs=[])
+    assert await add_public_when_empty(ctx) is False
+    device.get_channel = real  # type: ignore[method-assign]
+    assert await read_channel_slots(device) == []
+
+
+async def test_the_startup_step_never_opens_the_radio(ctx: AppContext) -> None:
+    """With no live link, the step does nothing at all: it never connects to write."""
+    from meshterm.ui.public_default import add_public_when_empty
+
+    _as_a_radio(ctx)
+    ctx.ui = _ScriptedUi(selects=[], texts=[], dialogs=[])
+    assert ctx.is_connected is False
+    assert await add_public_when_empty(ctx) is False
+    assert ctx.is_connected is False
+
+
+async def test_the_preference_turns_the_step_off(ctx: AppContext) -> None:
+    """A user who wants a radio with no channel turns the preference off.
+
+    The Chat picker still offers Public there, because that offer only asks.
+    """
+    from meshterm.ui.public_default import add_public_when_empty
+
+    device = await ctx.device()
+    _as_a_radio(ctx)
+    ctx.preferences.set("public_on_empty_device", False)
+    ctx.ui = _ScriptedUi(selects=[], texts=[], dialogs=[])
+    assert await add_public_when_empty(ctx) is False
+    assert await read_channel_slots(device) == []
+
+
+async def test_the_simulator_is_passed_over(ctx: AppContext) -> None:
+    """``--mock`` starts with no channel at each launch, so the step leaves it alone.
+
+    Without this, each launch of the development loop and of the emulator wrote a channel
+    and stopped on a card.
+    """
+    from meshterm.ui.public_default import add_public_when_empty
+
+    device = await ctx.device()
+    assert ctx.mock is True
+    ctx.ui = _ScriptedUi(selects=[], texts=[], dialogs=[])
+    assert await add_public_when_empty(ctx) is False
+    assert await read_channel_slots(device) == []
