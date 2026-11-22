@@ -444,6 +444,17 @@ class DeviceState:
                     return slots
         return self._channels
 
+    def peek_channel_slots(self) -> list[ChannelSlot] | None:
+        """The channel slots that the cache already has, or ``None`` when it has none yet.
+
+        This method never reads from the device. It is for a page that names how many
+        channels the device holds as one fact among many (the Device info page). The probe
+        behind :meth:`channel_slots` reads every slot index, which is one of the slowest
+        reads of a session. A count is not worth that cost, and the prewarm fills this
+        cache anyway.
+        """
+        return None if self._channels is None else list(self._channels)
+
     async def channel_capacity(self) -> int:
         """Return the channel-slot capacity of the device, found once and kept for the session.
 

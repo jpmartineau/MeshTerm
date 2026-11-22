@@ -11,6 +11,27 @@ can change how things behave. It does not only add new things.
 
 ### Added
 
+- **Device info says everything that the companion reports.** The status panel grew from
+  nine rows to twenty-six, in four groups. **What the node is**: its role, its public key
+  with the routed bytes lit, its model, its firmware with the companion protocol version,
+  and the place where it says it is. **What MeshTerm does with it**: the default flood
+  scope and the transport key of that scope, the active site with the outbound paths and
+  the kept device routes that apply here, and the name of the radio preset that the four
+  radio settings match. **How it is doing**: the battery, the storage, the sensor readings
+  of the node itself, the clock with its drift as a readable duration, the uptime, the
+  contacts and the channels against the capacities of the device, the packets that wait to
+  go out, and the firmware error count. **What it heard and sent**: the noise floor with
+  the last RSSI and SNR, the airtime, and the packet counts, now split into flood and
+  direct for both directions. A node with no scope says that its floods reach everyone. A
+  node that stores a scope key that its own scope name does not give says so, which
+  nothing else in MeshTerm could show. Each value wraps under its own column, so a long
+  reading never goes back to the left edge, and a 64-digit key stays whole.
+- **`meshterm info` answers with the settings too.** It gives three parts: the status, the
+  sensor readings as a listing, and every setting of the device. The settings come from
+  the one definition that `config show` answers with, under the keys that `config get` and
+  `config set` take. Thus the scripted face says the same about a device as the page does,
+  and no setting is spelled two ways. `--json` gives the status at the top level, the
+  readings under `telemetry`, and the settings under `settings`.
 - **A channel message that you send shows whether a repeater relayed it.** A channel has
   no acknowledgement, but your radio hears each repeater that relays your message. The
   end of your message shows a spinner, then `✓` and the number of repeaters that sent a

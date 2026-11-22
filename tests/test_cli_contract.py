@@ -53,7 +53,14 @@ _PATH_SPEC = re.compile(r"[0-9a-f]+(?:,[0-9a-f]+)*")
 _LISTINGS: list[tuple[str, list[str], list[str]]] = [
     # (command, arguments, headings or keys the output must carry)
     ("contacts", [], ["NAME", "TYPE", "HEARD", "PKTS", "HASH", "LOCATION", "PLACE", "KEY"]),
-    ("info", [], ["name", "public_key", "role"]),
+    # ``info`` answers with three blocks: the status, the sensor readings, and every
+    # setting. The settings come from the definition that ``config show`` answers with, so
+    # one setting is never spelled two ways.
+    (
+        "info",
+        [],
+        ["name", "public_key", "role", "queue_len", "packets_sent_flood", "CHANNEL", "radio_freq"],
+    ),
     ("config", ["show"], ["name", "radio_freq", "tx_power"]),
     ("preferences", ["show"], ["PREFERENCE", "VALUE", "DEFAULT", "DESCRIPTION"]),
     ("chat", ["list"], ["CONVERSATION", "KIND", "UNREAD", "LAST", "LAST_TEXT"]),

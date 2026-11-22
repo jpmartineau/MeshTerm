@@ -268,6 +268,40 @@ def _run(coro):  # noqa: ANN001, ANN202 - a small helper for the async steps
     return asyncio.run(coro)
 
 
+def test_place_of_answers_through_a_running_service(tmp_path: Path) -> None:
+    """With a service, ``place_of`` gives what the service holds."""
+    service, repo = _service(tmp_path)
+    repo.save_node_place("aaaaaaaaaaaa", 45.0, -73.0, Place("Villeray", "Montréal", SOURCE_TILES))
+
+    place = places_service.place_of(service._ctx, "aaaaaaaaaaaa")
+
+    assert place is not None and place.label == "Villeray, Montréal"
+
+
+def test_place_of_reads_the_stores_when_no_service_runs(tmp_path: Path) -> None:
+    """A scripted run has no service, so the function reads the two sources itself.
+
+    The Device info page and ``meshterm info`` must name the same place. The page has a
+    service and the command has none, so this path is the one that the command takes.
+    """
+    service, repo = _service(tmp_path)
+    ctx = service._ctx
+    places_service._CURRENT = None  # the state of a scripted run: no session made a service
+    try:
+        repo.save_node_place(
+            "aaaaaaaaaaaa", 45.0, -73.0, Place("Villeray", "Montréal", SOURCE_TILES)
+        )
+        repo.save_node_place("bbbbbbbbbbbb", 45.0, -73.0, Place(None, None, SOURCE_TILES))
+        ctx.place_store.set("cccccccccccc", "The Shed", when=0)
+
+        assert places_service.place_of(ctx, "aaaaaaaaaaaa").label == "Villeray, Montréal"
+        assert places_service.place_of(ctx, "bbbbbbbbbbbb") is None  # an empty place is none
+        assert places_service.place_of(ctx, "cccccccccccc").label == "The Shed"  # typed
+        assert places_service.place_of(ctx, None) is None
+    finally:
+        places_service._CURRENT = service
+
+
 def test_a_typed_place_wins_and_an_empty_place_is_none(tmp_path: Path) -> None:
     """A typed place wins over a found place, and an empty found place is none."""
     service, repo = _service(tmp_path)

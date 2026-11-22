@@ -36,9 +36,11 @@ from types import SimpleNamespace
 
 import pytest
 from rich.cells import cell_len
+from rich.console import Group
 from rich.text import Text
 
 from meshterm.core.channels import DEFAULT_PUBLIC_SECRET, derive_secret
+from meshterm.core.connection import derived_scope_key
 from meshterm.core.courier_store import CourierStore
 from meshterm.core.models import (
     NODE_TYPE_CHAT,
@@ -73,6 +75,7 @@ from meshterm.services.message_paths import Arrival
 from meshterm.services.monitor_service import ACTIVITY_BUCKETS
 from meshterm.services.records import CATEGORY_BY_ID
 from meshterm.services.topology import MeshTopology, build_topology
+from meshterm.tools.info import AppFacts, status_panel
 from meshterm.ui.about import (
     AboutPage,
     about_author,
@@ -1730,9 +1733,17 @@ def _tx_sweep(cols: int, rows: int) -> Screen:
 #: field that the config table draws, with the pairing PIN that the table conceals.
 _DEVICE_SNAPSHOT = {
     "name": "Homestead-Hub",
+    "public_key": "3d63c6429436b1e8a4f2c0d5768e9a1b2c3d4e5f60718293a4b5c6d7e8f90a1b",
+    "adv_type": 1,
     "adv_lat": 45.5017,
     "adv_lon": -73.5673,
     "ble_pin": 123456,
+    "model": "Heltec V3",
+    "ver": "v1.15.0",
+    "fw_build": "1a2b3c4d",
+    "fw ver": 12,
+    "max_contacts": 300,
+    "max_channels": 8,
     "radio_freq": 869525,
     "radio_bw": 250,
     "radio_sf": 11,
@@ -1743,7 +1754,8 @@ _DEVICE_SNAPSHOT = {
     "rx_delay": 0.0,
     "manual_add_contacts": 0,
     "autoadd_config": 0,
-    "flood_scope": "",
+    "flood_scope": "yul",
+    "flood_scope_key": derived_scope_key("yul"),
     "adv_loc_policy": 1,
     "multi_acks": 0,
     "telemetry_mode_base": 1,
@@ -1753,10 +1765,61 @@ _DEVICE_SNAPSHOT = {
 }
 
 
+#: The live readings behind the status panel of the Device info page. Every field that any
+#: of the three statistics frames reports is here, so that the gallery measures the widest
+#: row that a real device can draw.
+_DEVICE_READINGS = {
+    "battery": {"level": 4100, "used_kb": 412, "total_kb": 1024},
+    "stats": {
+        "uptime_secs": 273_640,
+        "errors": 0,
+        "queue_len": 2,
+        "noise_floor": -112,
+        "last_rssi": -96,
+        "last_snr": 7.25,
+        "tx_air_secs": 318,
+        "rx_air_secs": 9_412,
+        "recv": 14_803,
+        "sent": 1_212,
+        "flood_tx": 388,
+        "direct_tx": 824,
+        "flood_rx": 11_590,
+        "direct_rx": 3_213,
+        "recv_errors": 41,
+    },
+    "clock": 1_764_000_000,
+    "telemetry": [
+        {"channel": 0, "name": "voltage", "value": 4.1},
+        {"channel": 1, "name": "temperature", "value": 21.5},
+    ],
+}
+
+#: What MeshTerm knows about its own node, with each field filled: the panel then draws
+#: every row that it has.
+_DEVICE_APP_FACTS = AppFacts(
+    place="Villeray, Montréal",
+    site="Home",
+    outbound_paths=2,
+    kept_routes=3,
+    contacts=27,
+    channels=4,
+    preset="Default",
+)
+
+
+def _device_info_page(reveal: bool) -> Group:
+    """The Device info page: the status panel over the settings table, as the tool draws it."""
+    return Group(
+        status_panel(_DEVICE_SNAPSHOT, _DEVICE_READINGS, _DEVICE_APP_FACTS),
+        Text(""),
+        config_table(_DEVICE_SNAPSHOT, {}, reveal_pin=reveal),
+    )
+
+
 def _device_info(cols: int, rows: int) -> Screen:
     return DeviceInfoScreen(
         _GallerySession(cols, rows),
-        lambda reveal: config_table(_DEVICE_SNAPSHOT, {}, reveal_pin=reveal),
+        _device_info_page,
         title="Device info",
         conceals=has_pin(_DEVICE_SNAPSHOT),
     )

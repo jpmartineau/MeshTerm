@@ -426,15 +426,36 @@ async def _show(ctx: AppContext, device: Device, snapshot: dict) -> Listing | No
     the one value in it that lets the phone of another person connect to the radio.
     ``config get device_pin`` names it on purpose.
     """
-    from ..ui import fields, script
-    from ..ui.config_editor import PIN_KEY, conceal, config_table
-    from ..ui.report import Listing
+    from ..ui.config_editor import config_table
     from ..ui.surface import TuiUi
 
     custom = await device.get_custom_vars()
     if isinstance(ctx.ui, TuiUi):
         ctx.ui.show(config_table(snapshot, custom))
         return None
+    return settings_listing(snapshot, custom)
+
+
+def settings_listing(snapshot: dict, custom: dict[str, str]) -> Listing:
+    """Every setting and custom variable of a snapshot, as one listing.
+
+    This is the scripted face of the settings table, and it is the only definition of it.
+    ``config show`` answers with it. ``info`` puts it under its status block, so that the
+    scripted face says the same about a device as the Device info page does
+    (:func:`~meshterm.tools.info.InfoTool.run`). Both faces use these keys, exactly as
+    ``config get`` and ``config set`` name them. Thus one setting is never spelled two
+    ways.
+
+    Args:
+        snapshot: The device snapshot from ``build_snapshot``.
+        custom: The current custom variables of the device.
+
+    Returns:
+        The listing, with one record for each setting and each custom variable.
+    """
+    from ..ui import fields, script
+    from ..ui.config_editor import PIN_KEY, conceal
+    from ..ui.report import Listing
 
     rows: list[dict[str, Any]] = []
     for _category, specs in settings_by_category():

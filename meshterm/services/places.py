@@ -144,6 +144,39 @@ def current() -> PlaceService | None:
     return _CURRENT
 
 
+def place_of(ctx: AppContext, node: str | None) -> Place | None:
+    """The place of a node, with or without a running place service.
+
+    A menu session always has a service, and its cache answers at once. A scripted run has
+    none, so this function reads the two sources that the service reads: the place that the
+    user typed, and the places that the job stored before. Thus one command gets the same
+    answer on both faces.
+
+    Args:
+        ctx: The shared application context.
+        node: The key prefix or the full public key of the node.
+
+    Returns:
+        The place, or ``None`` when MeshTerm knows none.
+    """
+    service = current()
+    if service is not None:
+        return service.get(node)
+    if not node:
+        return None
+    key = _norm(node)
+    typed = ctx.place_store.get(key) if ctx.place_store is not None else None
+    if typed:
+        return Place(typed, None, SOURCE_USER)
+    try:
+        found = ctx.repo.node_places()
+    except Exception as exc:  # noqa: BLE001 - no place is better than no answer
+        ctx.log.debug("places: read failed: %s", exc)
+        return None
+    hit = found.get(key)
+    return None if hit is None or hit[0].empty else hit[0]
+
+
 class PlaceService:
     """The places of the nodes: a read side from memory, and a background job that finds them."""
 

@@ -12,7 +12,7 @@ import pytest
 import typer
 
 from meshterm.core.config_io import backup_config, plan_restore, read_backup
-from meshterm.core.connection import MockDevice
+from meshterm.core.connection import MockDevice, derived_scope_key
 from meshterm.core.device_config import (
     RADIO_PRESETS,
     DeviceConfigError,
@@ -1818,11 +1818,12 @@ async def test_status_panel_reports_role_battery_clock_and_stats() -> None:
 
     from rich.console import Console
 
-    from meshterm.tools.info import _status_panel
+    from meshterm.tools.info import AppFacts, read_status, status_panel
     from meshterm.ui.theme import MESH_THEME
 
     device = await _connected_mock()
-    panel = await _status_panel(device, await build_snapshot(device))
+    snapshot = await build_snapshot(device)
+    panel = status_panel(snapshot, await read_status(device), AppFacts(preset="Default"))
     console = Console(theme=MESH_THEME, file=io.StringIO(), width=100)
     console.print(panel)
     out = console.file.getvalue()
@@ -1834,6 +1835,97 @@ async def test_status_panel_reports_role_battery_clock_and_stats() -> None:
     assert "s behind" in out  # the clock drift that the mock sets at the start
     assert "-110 dBm noise floor" in out
     assert "210 sent" in out and "1234 received" in out
+
+
+async def test_status_panel_reports_the_facts_that_only_the_newer_frames_give() -> None:
+    """The panel draws each fact that the firmware reports and that no screen drew before."""
+    import io
+
+    from rich.console import Console
+
+    from meshterm.tools.info import AppFacts, read_status, status_panel
+    from meshterm.ui.theme import MESH_THEME
+
+    device = await _connected_mock()
+    await device.set_default_flood_scope("yul")
+    snapshot = await build_snapshot(device)
+    app = AppFacts(place="Villeray", site="Home", outbound_paths=2, kept_routes=3, contacts=27)
+    console = Console(theme=MESH_THEME, file=io.StringIO(), width=100)
+    console.print(status_panel(snapshot, await read_status(device), app))
+    out = console.file.getvalue()
+
+    assert "protocol 12" in out  # the companion API version of the device-query frame
+    assert "yul" in out and derived_scope_key("yul") in out  # the scope and its key
+    assert "Villeray" in out and "Home" in out and "3 kept routes" in out
+    assert "27 / 300" in out  # the contacts of the device against its capacity
+    assert "waiting to send" in out  # the outbound queue of the firmware
+    assert "40 sent" in out and "900 received" in out  # the flood split of the packets
+    assert "170 sent" in out and "334 received" in out  # and the direct split
+    assert "temperature 21.5 °C" in out  # the sensor readings of the node itself
+
+
+async def test_status_panel_warns_when_a_stored_scope_key_is_not_the_key_of_its_name() -> None:
+    """A device that stores a key that its scope name does not give gets a warning on the row.
+
+    Nothing else in MeshTerm can show this fault. A flood that goes out under that key
+    reaches no repeater that listens for the name.
+    """
+    import io
+
+    from rich.console import Console
+
+    from meshterm.tools.info import AppFacts, read_status, status_panel
+    from meshterm.ui.theme import MESH_THEME
+
+    device = await _connected_mock()
+    await device.set_default_flood_scope("yul")
+    snapshot = {**await build_snapshot(device), "flood_scope_key": "ff" * 16}
+    console = Console(theme=MESH_THEME, file=io.StringIO(), width=100)
+    console.print(status_panel(snapshot, await read_status(device), AppFacts()))
+
+    assert "does not match the name" in console.file.getvalue()
+
+
+async def test_an_unscoped_device_says_that_its_floods_reach_everyone() -> None:
+    """With no default scope, the row is a statement and not an empty value."""
+    import io
+
+    from rich.console import Console
+
+    from meshterm.tools.info import AppFacts, read_status, status_panel
+    from meshterm.ui.theme import MESH_THEME
+
+    device = await _connected_mock()
+    snapshot = await build_snapshot(device)
+    console = Console(theme=MESH_THEME, file=io.StringIO(), width=100)
+    console.print(status_panel(snapshot, await read_status(device), AppFacts()))
+    out = console.file.getvalue()
+
+    assert "unscoped" in out and "floods reach everyone" in out
+
+
+async def test_the_snapshot_holds_the_transport_key_of_the_default_scope() -> None:
+    """``build_snapshot`` reads the scope name and its key in one frame."""
+    device = await _connected_mock()
+    await device.set_default_flood_scope("yul")
+
+    snapshot = await build_snapshot(device)
+
+    assert snapshot["flood_scope"] == "yul"
+    assert snapshot["flood_scope_key"] == derived_scope_key("yul")
+
+
+async def test_telemetry_readings_carry_their_unit_on_each_face() -> None:
+    """The plain face puts the unit in the value. The document keeps the number alone."""
+    from meshterm.tools.info import read_status, telemetry_listing
+
+    device = await _connected_mock()
+    listing = telemetry_listing((await read_status(device))["telemetry"])
+    rows = {row["name"]: row for row in listing.rows}
+
+    assert rows["temperature"]["value"].text == "21.5 °C"
+    assert rows["temperature"]["value"].value == 21.5
+    assert rows["temperature"]["unit"] == "°C"
 
 
 def test_uptime_renders_compact_units() -> None:

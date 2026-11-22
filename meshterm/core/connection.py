@@ -1216,6 +1216,50 @@ def serial_port_present(port: str) -> bool:
     return False
 
 
+def lpp_readings(raw: object) -> list[dict]:
+    """Turn the Cayenne LPP frame of a telemetry answer into one dict for each reading.
+
+    The library decodes the frame already. It gives a list of entries, each with the
+    channel that the reading came from, the kind of value (``type``, which is a word and
+    not a number), and the value itself. This function keeps those three fields, names the
+    kind ``name``, and drops anything that it cannot read. Thus a malformed answer costs
+    the readings that it broke, and not the page that shows them.
+
+    Args:
+        raw: The ``lpp`` field of a telemetry answer.
+
+    Returns:
+        One dict for each reading, with ``channel``, ``name``, and ``value``.
+    """
+    readings: list[dict] = []
+    for item in raw if isinstance(raw, list) else ():
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("type") or "").strip()
+        if not name:
+            continue
+        readings.append({"channel": item.get("channel"), "name": name, "value": item.get("value")})
+    return readings
+
+
+def derived_scope_key(name: str | None) -> str | None:
+    """Return the transport key that a scope name gives, or ``None`` when there is no name.
+
+    Args:
+        name: A region name, bare or with its ``#``. An empty name means no scope.
+
+    Returns:
+        The 16-byte key as lowercase hex, or ``None`` for no scope and for a name that no
+        region can carry.
+    """
+    if not name:
+        return None
+    try:
+        return region_key(name).hex()
+    except Exception:  # noqa: BLE001 - a name the firmware stored can still be invalid here
+        return None
+
+
 class Device(ABC):
     """An abstract companion device, with the operations that MeshTerm uses.
 
@@ -1884,6 +1928,42 @@ class Device(ABC):
             The ``#scope`` name that limits flood routing, an empty string when no scope
             is set, or ``None`` if the firmware is older than flood scopes.
         """
+
+    async def get_default_flood_scope_detail(self) -> dict:
+        """Return the stored default flood scope: its name, and its transport key.
+
+        The firmware sends both in one frame. :meth:`get_default_flood_scope` gives only
+        the name, because that is all a send needs. The Device info page also shows the
+        key, so that the user can compare what the device stores with what the name gives.
+
+        A transport that cannot report the key derives it from the name
+        (:func:`~meshterm.core.regions.region_key`), because the key is a pure function of
+        the name. A transport that reads the frame overrides this method and returns the
+        key of the device itself. Thus a device that stores a key that does not match its
+        own name is visible.
+
+        Returns:
+            ``{"name": str | None, "key": str | None}``. The name is ``""`` when no scope
+            is set, and ``None`` on firmware that is older than flood scopes. The key is
+            lowercase hex, or ``None`` when there is no scope.
+        """
+        name = await self.get_default_flood_scope()
+        return {"name": name, "key": derived_scope_key(name)}
+
+    async def get_self_telemetry(self) -> list[dict]:
+        """Return the sensor readings of this node, as the firmware reports them.
+
+        The firmware answers with a Cayenne LPP frame: one entry for each reading, each
+        with the channel that it came from and the kind of value that it holds. Firmware
+        that does not support the query, and a transport that cannot ask, both answer with
+        an empty list. Thus a caller never has to test which device it has.
+
+        Returns:
+            One dict for each reading: ``channel`` (int), ``name`` (the kind of reading,
+            for example ``temperature``), and ``value`` (a number, or a dict of fields for
+            a reading that has several).
+        """
+        return []
 
     @abstractmethod
     async def get_time(self) -> int | None:
@@ -4624,13 +4704,28 @@ class MeshCoreDevice(Device):
         ]
 
     async def get_default_flood_scope(self) -> str | None:  # noqa: D102
+        detail = await self.get_default_flood_scope_detail()
+        name = detail.get("name")
+        return None if name is None else str(name)
+
+    async def get_default_flood_scope_detail(self) -> dict:  # noqa: D102
         event = self._ok(await self._require().commands.get_default_flood_scope())
         payload = getattr(event, "payload", {}) or {}
         name = payload.get("scope_name")
+        key = payload.get("scope_key")
         # Return the name bare, whatever client wrote it. MeshTerm (before it built its own
         # frames) and the library (still now) stored a ``#`` that the firmware and the apps
-        # do not use.
-        return None if name is None else normalize_region(str(name))
+        # do not use. The key comes from the same frame, so it is the key of the device and
+        # not a key that MeshTerm derived.
+        return {
+            "name": None if name is None else normalize_region(str(name)),
+            "key": str(key).lower() or None if key else None,
+        }
+
+    async def get_self_telemetry(self) -> list[dict]:  # noqa: D102
+        event = self._ok(await self._require().commands.get_self_telemetry())
+        payload = getattr(event, "payload", {}) or {}
+        return lpp_readings(payload.get("lpp"))
 
     async def get_time(self) -> int | None:  # noqa: D102 - inherited docstring
         event = self._ok(await self._require().commands.get_time())
@@ -5198,9 +5293,21 @@ class MockDevice(Device):
             "model": "MeshCore Simulator",
             "ver": "mock",
             "fw_build": "mock",
+            "fw ver": 12,
+            "max_contacts": 300,
+            "max_channels": self._max_channels,
             "ble_pin": self._device_pin,
             "repeat": self._client_repeat,
         }
+
+    async def get_self_telemetry(self) -> list[dict]:  # noqa: D102 - inherited docstring
+        # The readings that almost every board reports: the battery on channel 0, and one
+        # environment sensor. Thus the Device info page has a telemetry block to draw.
+        return [
+            {"channel": 0, "name": "voltage", "value": 4.1},
+            {"channel": 0, "name": "percentage", "value": 86},
+            {"channel": 1, "name": "temperature", "value": 21.5},
+        ]
 
     async def get_contacts(self) -> list[Contact]:  # noqa: D102 - inherited docstring
         return list(self._contacts)

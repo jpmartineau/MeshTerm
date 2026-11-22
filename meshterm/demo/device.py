@@ -112,9 +112,21 @@ class DemoDevice(MockDevice):
             "model": "MeshCore Simulator",
             "ver": "v1.15.0",
             "fw_build": "demo",
+            "fw ver": 12,
+            "max_contacts": 300,
+            "max_channels": self._max_channels,
             "ble_pin": self._device_pin,
             "repeat": self._client_repeat,
         }
+
+    async def get_self_telemetry(self) -> list[dict]:  # noqa: D102 - inherited docstring
+        # The board of our node: the battery, and the sensor on its expansion header.
+        return [
+            {"channel": 0, "name": "voltage", "value": 3.98},
+            {"channel": 0, "name": "percentage", "value": 74},
+            {"channel": 1, "name": "temperature", "value": 18.5},
+            {"channel": 1, "name": "humidity", "value": 46.0},
+        ]
 
     async def get_battery(self) -> dict:  # noqa: D102 - inherited docstring
         return {"level": 3980, "used_kb": 412, "total_kb": 1024}

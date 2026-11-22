@@ -274,9 +274,10 @@ async def build_snapshot(
     Returns:
         A dict with the keys of ``SELF_INFO``, and also ``rx_delay``,
         ``airtime_factor``, ``path_hash_mode``, ``autoadd_config``,
-        ``autoadd_max_hops``, and ``flood_scope``. Below these, it has the facts of the
-        device-query frame (``ble_pin``, ``model``, client ``repeat``). If the firmware
-        can relay, the dict also has its ``repeat_freqs``.
+        ``autoadd_max_hops``, ``flood_scope``, and ``flood_scope_key``. Below these, it
+        has the facts of the device-query frame (``ble_pin``, ``model``, ``fw ver``,
+        ``max_contacts``, ``max_channels``, client ``repeat``). If the firmware can relay,
+        the dict also has its ``repeat_freqs``.
     """
     snapshot = dict(self_info if self_info is not None else await device.get_self_info())
     try:
@@ -300,10 +301,16 @@ async def build_snapshot(
         hops = None
     if hops is not None:
         snapshot["autoadd_max_hops"] = hops
+    # One read gives the scope name and the transport key that the device stores for it.
+    # The settings registry uses the name. The Device info page shows the key beside it.
     try:
-        snapshot["flood_scope"] = await device.get_default_flood_scope()
+        scope = await device.get_default_flood_scope_detail()
     except Exception:  # noqa: BLE001 - an optional read. Its absence is acceptable.
-        pass
+        scope = {}
+    if scope.get("name") is not None:
+        snapshot["flood_scope"] = scope["name"]
+    if scope.get("key"):
+        snapshot["flood_scope_key"] = scope["key"]
     # The device-query frame is a payload that is different from SELF_INFO, and some
     # settings are only there. One of them is the BLE pairing code: real firmware reports
     # it as ``ble_pin``, and never puts it in SELF_INFO. Without this read, the Device PIN
