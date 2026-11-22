@@ -308,10 +308,12 @@ def exit_rows(staged: int, *, apply_value: Any, back_value: Any) -> list:
         Choice(
             title=Text.assemble(("✓ ", "ok"), f"Apply {changes_phrase(staged)}"),
             value=apply_value,
+            always_shown=True,
         ),
         Choice(
             title=Text.assemble(("✗ ", "err"), "Back — discard staged changes"),
             value=back_value,
+            always_shown=True,
         ),
     ]
 

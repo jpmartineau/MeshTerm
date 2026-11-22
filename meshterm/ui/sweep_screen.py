@@ -625,12 +625,13 @@ def _preview_items(victims: list[ScoredContact], locks: list[ScoredContact] | No
         # of the other way out. This is not ``exit_rows`` itself, because these rows are not
         # staged changes to a set of values, and the pair must say what it archives.
         Separator(" "),
-        Choice(title=Text.assemble(("✓ ", "ok"), apply), value=_APPLY),
+        Choice(title=Text.assemble(("✓ ", "ok"), apply), value=_APPLY, always_shown=True),
         Choice(
             title=Text.assemble(
                 ("✗ ", "err"), "Back — change nothing" if staged else "Back — keep them all"
             ),
             value=_BACK,
+            always_shown=True,
         ),
     ]
 

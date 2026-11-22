@@ -315,8 +315,13 @@ def _save_rows(unsaved: int) -> list:
         Choice(
             title=Text.assemble(("✓ ", "ok"), f"Save {unsaved} {noun} to the repeater"),
             value=_SAVE,
+            always_shown=True,
         ),
-        Choice(title=Text.assemble(("✗ ", "err"), "Back — a reboot undoes them"), value=_BACK),
+        Choice(
+            title=Text.assemble(("✗ ", "err"), "Back — a reboot undoes them"),
+            value=_BACK,
+            always_shown=True,
+        ),
     ]
 
 

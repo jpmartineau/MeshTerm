@@ -226,7 +226,12 @@ deliberately, one at a time, and say why in the code.
   clean and, once changes are staged, one blank `Separator(" ")` line then
   `✓ Apply n staged changes` over `✗ Back — discard staged changes` — Apply has no key of
   its own, so it needs a visible counterpart naming what the other way out costs. Same
-  shape in `ReorderScreen`. A **Quit** row is likewise kept (main menu, device splash):
+  shape in `ReorderScreen`. **A filter never hides a way out**: the pair carries
+  `Choice.always_shown`, so a typed query narrows the content and leaves Apply and the
+  Back that names its cost (JP, 2026-11-22) — a filter that hid Apply put the only way to
+  commit behind an Esc nobody knew to press. Same flag on the live-then-save pair and the
+  sweep's Archive/Back; a verb row a reader *searches for* (an Actions section, a menu) is
+  content and filters like any row. A **Quit** row is likewise kept (main menu, device splash):
   it *initiates* the app's terminal action behind a confirm, and on the splash it is the
   only statement that the app can be left at all.
 - **An editor has one of two shapes, chosen by who holds the change.** Where MeshTerm

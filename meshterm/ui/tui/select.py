@@ -86,6 +86,13 @@ class Choice:
             row, there is nothing that is worth a slide. Also, if the highlight changes the
             row back to a chart that is cut off, the fit is lost on the row that the user
             reads.
+        always_shown: The row stays in the list while a find-as-you-type filter narrows
+            it. It is for an **action** row, which is a way out of the screen and not one
+            of the rows that the user searches: the ``✓ Apply …`` / ``✗ Back …`` pair of an
+            editor, and the save pair of a live page. Apply has no keyboard key of its own,
+            so a filter that hid it put the only way to commit the staged changes behind a
+            press of Esc that the user does not know to make. The filter looks through the
+            *content* of a list. An action is not content.
         pans: The row is a line of a table that ←→ pan as one unit. Each row and each
             column header that pans (:attr:`Separator.pans`) slides by the same shift. Thus
             the lanes stay under their labels, however far the user panned. The shift also
@@ -101,6 +108,7 @@ class Choice:
     detail: str | Text | Callable[[], str | Text] | None = None
     hscroll_from: int = 0
     fitted: bool = False
+    always_shown: bool = False
     pans: bool = False
 
     def __post_init__(self) -> None:
@@ -624,7 +632,9 @@ class SelectScreen(Screen):
 
         Without a filter, groups and headings show as written. With a filter, only the
         choices that match are shown. But each separator stays, so the list keeps its
-        section landmarks (and column headers) while it narrows.
+        section landmarks (and column headers) while it narrows. An action row stays too
+        (:attr:`Choice.always_shown`): the filter searches the content of the list, and the
+        way out of the screen is not content.
         """
         needle = self._filter.strip().lower()
         if not needle:
@@ -632,7 +642,9 @@ class SelectScreen(Screen):
         return [
             it
             for it in self._items
-            if isinstance(it, Separator) or needle in _plain(it.label).lower()
+            if isinstance(it, Separator)
+            or it.always_shown
+            or needle in _plain(it.label).lower()
         ]
 
     def _choices(self, rows: list | None = None) -> list:

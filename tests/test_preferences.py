@@ -346,6 +346,28 @@ def test_a_staged_change_shows_its_arrow_and_the_save_action() -> None:
     assert any("✗ Back — discard staged changes" in row for row in rows)
 
 
+def test_a_filter_narrows_the_settings_and_keeps_the_apply_and_back_rows() -> None:
+    """A typed filter hides the settings that do not match. The exit pair stays.
+
+    Apply has no keyboard key of its own. Thus a filter that hid it left no way to commit
+    the staged changes. The filter searches the content of the page, and an action is not
+    content.
+    """
+    from meshterm.ui.tui import SelectScreen
+
+    title, items = _menu_items(Preferences(), {"history_days": 90})
+    screen = SelectScreen(title, items)
+    screen.note_viewport(len(items) + 4)
+    for ch in "zzzz":  # a query that no setting matches
+        screen.handle("text", ch)
+    rows = [line.strip() for line in _plain(screen.render_body(_WIDE)).splitlines()]
+    assert not any("Map tiles" in row for row in rows)
+    assert any("✓ Apply 1 staged change" in row for row in rows)
+    assert any("✗ Back — discard staged changes" in row for row in rows)
+    # They are still rows that the highlight can reach, and not only drawn lines.
+    assert [choice.value for choice in screen._choices()] == ["__apply__", "__cancel__"]
+
+
 def test_a_long_value_is_capped_so_the_descriptions_keep_their_lane() -> None:
     """The page makes the basemap URL shorter in the lane.
 
