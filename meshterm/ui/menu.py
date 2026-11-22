@@ -766,9 +766,7 @@ def _menu_lane(tools: Sequence[Any]) -> int:
         The column width from :func:`~meshterm.ui.menus.icon_lane`: ``0`` where the
         platform draws no icon lane.
     """
-    return icon_lane(
-        [*(tool.icon for tool in tools), _QUIT_ICON, _SOUND_ON_ICON, _SOUND_OFF_ICON]
-    )
+    return icon_lane([*(tool.icon for tool in tools), _QUIT_ICON, _SOUND_ON_ICON, _SOUND_OFF_ICON])
 
 
 def _menu_labels(tools: Sequence[Any], *, lane: int | None = None) -> list[Text]:

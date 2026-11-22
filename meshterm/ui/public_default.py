@@ -93,10 +93,10 @@ async def add_public_when_empty(ctx: AppContext) -> bool:
 
     The function does its best only, and it is quiet. It does nothing in these cases: the
     preference is off, the simulator, no live link, a device that has a channel, or a probe
-    that could not prove that the device has none. It never opens the radio itself. A deferred connect
-    (``connect_on_start`` off) skips the function, because ``is_connected`` is false. A
-    failure here must not stop the user from reaching the menu, so the function guards each
-    step.
+    that could not prove that the device has none. It never opens the radio itself. A
+    deferred connect (``connect_on_start`` off) skips the function, because
+    ``is_connected`` is false. A failure here must not stop the user from reaching the
+    menu, so the function guards each step.
 
     Args:
         ctx: The shared application context.

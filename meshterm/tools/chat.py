@@ -738,9 +738,7 @@ async def _add_public_channel(ctx: AppContext) -> Conversation | None:
     channels = _channels_from_slots(await ctx.devstate.channel_slots())
     # The key identifies the channel, and not the slot: the write went to the slot that the
     # confirming read gave, which can be another slot than the one that the row named.
-    return next(
-        (c for c in channels if c.on_device and c.secret == DEFAULT_PUBLIC_SECRET), None
-    )
+    return next((c for c in channels if c.on_device and c.secret == DEFAULT_PUBLIC_SECRET), None)
 
 
 async def _read_channels(device: Device) -> list[Conversation]:
