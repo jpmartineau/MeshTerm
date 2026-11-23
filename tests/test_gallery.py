@@ -102,7 +102,7 @@ from meshterm.ui.path_composer import PathComposerScreen
 from meshterm.ui.preferences import _menu_items as _preference_items
 from meshterm.ui.records_screen import RecordScreen, WalkVertex
 from meshterm.ui.remote_cli import RemoteCliScreen
-from meshterm.ui.repeater_admin import AdminMenu
+from meshterm.ui.repeater_admin import AdminMenu, neighbours_picker
 from meshterm.ui.repeater_admin import _menu_items as _admin_menu_items
 from meshterm.ui.theme import name_style
 from meshterm.ui.timemachine_screen import TimeMachineScreen
@@ -1862,6 +1862,33 @@ def _repeater_admin(cols: int, rows: int) -> Screen:
     return AdminMenu(title, items, footer_hint="↑↓ move · type to filter · Enter select · Esc back")
 
 
+def _repeater_neighbours(cols: int, rows: int) -> Screen:
+    """The neighbour table of a repeater, floated as the Trace-target picker is.
+
+    It has the widest shapes that the list can draw: a long name, a node that nothing can
+    name (which reads as its grey key prefix, after the unknown type mark), and an entry
+    for which the node gave neither a reading nor an age.
+    """
+    from datetime import timedelta
+
+    from meshterm.core.models import NeighbourInfo
+
+    hub = Contact(name="Hilltop-Repeater", public_key=_HUB_KEY, key_prefix="3d63c6429436")
+    now = utcnow()
+    entries = [
+        NeighbourInfo("a1b2c3d4", 7.5, now - timedelta(minutes=12)),
+        NeighbourInfo("b7c80912", 2.0, now - timedelta(days=9)),
+        NeighbourInfo("c3d4e5f6", -4.25, now - timedelta(hours=3)),
+        NeighbourInfo("ffee0011", None, None),
+    ]
+    contacts = [
+        Contact(name="Mont-Royal", public_key="a1b2c3d4" + "1" * 56, node_type=NODE_TYPE_REPEATER),
+        Contact(name="A Rather Long Node Name", public_key="b7c80912" + "2" * 56),
+        Contact(name="Chalet-Sensor", public_key="c3d4e5f6" + "3" * 56, node_type=NODE_TYPE_SENSOR),
+    ]
+    return neighbours_picker(hub, entries, contacts=contacts, prefix_bytes=1)
+
+
 def _preferences(cols: int, rows: int) -> Screen:
     """The Preferences page when it is widest.
 
@@ -2205,6 +2232,7 @@ _ENTRIES: list[_Entry] = [
     _Entry("config_editor_revealed", _config_editor_revealed),
     _Entry("repeater_admin", _repeater_admin),
     _Entry("region_editor", _region_editor),
+    _Entry("repeater_neighbours", _repeater_neighbours),
     _Entry("preferences", _preferences),
     _Entry("preferences-weekly-advert", _preferences_weekly_advert),
     _Entry("cooldown_countdown", _cooldown_countdown),

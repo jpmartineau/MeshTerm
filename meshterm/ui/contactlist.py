@@ -52,9 +52,9 @@ from typing import TYPE_CHECKING, Any
 from rich.cells import cell_len
 from rich.text import Text
 
-from .marks import LOCK_ICON, MANAGED_ICON, SELF_MARK
+from .marks import LOCK_ICON, MANAGED_ICON, SELF_MARK, UNKNOWN_MARK
 from .menus import fit_cells
-from .theme import glyph, name_style
+from .theme import glyph, name_style, snr_style
 from .tui.select import Choice, SelectScreen, Separator
 from .widgets import (
     DEFAULT_GLYPH,
@@ -115,9 +115,16 @@ class ContactLane:
         field: The :class:`ContactRow` attribute that holds the value of the lane.
         kind: ``"age"`` for a datetime drawn as a relative age in the colour of the
             recency heat, ``"count"`` for an integer count drawn muted (a faint ``—``
-            when ``None``), or ``"text"`` for a string drawn on the left (a faint ``—``
-            when ``None``). A ``text`` lane has no fixed width: the list sizes it to its
-            widest value (refer to :func:`_sized`), and :attr:`width` is the minimum.
+            when ``None``), ``"snr"`` for a signal reading drawn in the SNR scale of the
+            app (a muted ``—`` when ``None``), or ``"text"`` for a string drawn on the
+            left (a faint ``—`` when ``None``). A ``text`` lane has no fixed width: the
+            list sizes it to its widest value (refer to :func:`_sized`), and
+            :attr:`width` is the minimum.
+        absent: What an ``age`` lane draws when it has no value. ``"never"`` is the usual
+            word, and it is a *fact*: MeshTerm never heard the node. A lane whose source
+            can leave the age out without that meaning says so with ``"—"`` instead
+            (:data:`NEIGHBOUR_HEARD_LANE`: the remote node hears the neighbour, and it did
+            not say when).
     """
 
     column: str
@@ -125,6 +132,7 @@ class ContactLane:
     width: int
     field: str
     kind: str = "age"
+    absent: str = "never"
 
 
 #: How long ago MeshTerm last heard the node: the lane that each list of *live* contacts has.
@@ -148,6 +156,18 @@ ARCHIVED_LANE = ContactLane("archived", "ARCHIVED", 8, "archived_at")
 #: Archived list it is the first lane, after the name (JP, 2026-11-03).
 PLACE_LANE = ContactLane("place", "PLACE", 5, "place", kind="text")
 
+#: The signal-to-noise ratio that a **remote** node measured when it received from this
+#: one: the first lane of the neighbour table of a repeater. It is not our own reading, and
+#: the title of that dialog names the node whose reading it is.
+SNR_LANE = ContactLane("snr", "SNR", 5, "snr", kind="snr")
+
+#: How long ago a **remote** node last heard this one: the second lane of its neighbour
+#: table. It is drawn exactly as ``HEARD`` is, with the recency heat, because it is the same
+#: question (how long ago did this node receive from that one) asked at the other end of the
+#: link. A node that gave no age for an entry shows ``—``, which is not ``never``: it hears
+#: the neighbour, and it did not say when.
+NEIGHBOUR_HEARD_LANE = ContactLane("heard", "HEARD", 5, "heard_by_node", absent="—")
+
 #: The middle lanes of the usual contact list: ``NAME · HEARD · PKTS · KEY``.
 DEFAULT_LANES: tuple[ContactLane, ...] = (HEARD_LANE, PKTS_LANE)
 
@@ -156,6 +176,11 @@ CONTACTS_LANES: tuple[ContactLane, ...] = (HEARD_LANE, PKTS_LANE, PLACE_LANE)
 
 #: The middle lanes of the Trace-target picker, which puts ``TRACED`` before the usual two.
 TRACE_LANES: tuple[ContactLane, ...] = (TRACED_LANE, HEARD_LANE, PKTS_LANE)
+
+#: The middle lanes of the neighbour table of a repeater: ``NAME · SNR · HEARD · KEY``.
+#: Both middle lanes are the readings of the *remote* node, so there is no ``PKTS`` lane:
+#: our own packet count would be the one number on the row that is not its measurement.
+NEIGHBOUR_LANES: tuple[ContactLane, ...] = (SNR_LANE, NEIGHBOUR_HEARD_LANE)
 
 #: The middle lanes of the Archived list: ``NAME · PLACE · ARCHIVED · KEY``. There is no
 #: ``HEARD`` and no ``PKTS``. An archived contact is not on the device, so this screen is not
@@ -229,6 +254,19 @@ TRACE_SORT_OPENS_ASCENDING: dict[str, bool] = {
     "hash": True,
 }
 
+#: The sort ring of the neighbour table of a repeater: ``NAME · SNR · HEARD · KEY``, the
+#: same as :data:`NEIGHBOUR_LANES`. It opens on ``snr`` *descending*, so the strongest link
+#: is first: the strongest neighbours say where the node sits in the mesh. An entry with no
+#: reading has ``-inf``, so it collects at the weak end in both directions (refer to
+#: :func:`_ordered`).
+NEIGHBOUR_SORT_COLUMNS: tuple[str, ...] = ("name", "snr", "heard", "hash")
+NEIGHBOUR_SORT_OPENS_ASCENDING: dict[str, bool] = {
+    "name": True,
+    "snr": False,
+    "heard": True,
+    "hash": True,
+}
+
 #: The sort ring of the Archived list: ``NAME · PLACE · ARCHIVED · KEY``, the same as
 #: :data:`ARCHIVED_LANES`. ``archived`` opens *ascending* on the age of the lane, so the
 #: most recently archived contacts come first. This screen answers the question "what did
@@ -286,11 +324,22 @@ class ContactRow:
         archived_at: When this contact was archived and removed from the device (aware
             UTC). It fills the ``ARCHIVED`` lane (:data:`ARCHIVED_LANES`). Lists without
             that lane ignore it.
+        snr: The signal reading that a remote node measured for this one, in dB. It fills
+            the ``SNR`` lane (:data:`NEIGHBOUR_LANES`). ``None`` renders a muted ``—``.
+            Lists that do not declare the lane ignore it.
+        heard_by_node: When a remote node last heard this one (aware UTC). It fills the
+            ``HEARD`` lane of a neighbour table (:data:`NEIGHBOUR_LANES`), in the colour of
+            the recency heat. ``None`` renders a muted ``—``. Lists that do not declare the
+            lane ignore it.
         locked: Whether the contact is locked, so that it cannot be archived. A padlock
             then starts the row, on the left of the type glyph. ``False`` draws nothing
             there.
         managed: Whether the contact is a managed node: MeshTerm stores its admin
             password. The ``🔑`` then goes in the same column, after a padlock.
+        unknown: Whether nothing can place this node: it is not a contact of the device,
+            and no stored advert names it. The row then starts with the ``○`` unknown mark
+            in place of a type mark, because a type mark would be a claim about a node
+            that nobody identified. ``False`` keeps the mark of :attr:`node_type`.
         you: Whether this is our node. Our node gets the ``★`` marker, the pure-white
             ``you`` name style with a muted ``(you)`` tag, and faint ``—`` heard and packet
             lanes (MeshTerm never hears our node). Its row is pinned above the sorted
@@ -305,9 +354,12 @@ class ContactRow:
     count: int | None = None
     last_traced: datetime | None = None
     archived_at: datetime | None = None
+    snr: float | None = None
+    heard_by_node: datetime | None = None
     place: str | None = None
     locked: bool = False
     managed: bool = False
+    unknown: bool = False
     you: bool = False
 
 
@@ -401,10 +453,12 @@ def _lane_cell(row: ContactRow, lane: ContactLane) -> Text:
 
     An ``age`` lane draws the relative age in the column form (:func:`format_age`), in the
     colour of the recency heat. Thus a new value is bright and an old value is grey, the
-    same for each event that the lane measures. A ``count`` lane draws the count muted, or
+    same for each event that the lane measures. An age lane with no value draws the word of
+    its :attr:`~ContactLane.absent`. A ``count`` lane draws the count muted, or
     a faint ``—`` where there is nothing to count. It clamps the count, so that a very
-    large count cannot make the column wider. A ``text`` lane draws its string on the left,
-    padded to the lane, or a faint ``—`` where there is none.
+    large count cannot make the column wider. An ``snr`` lane draws the reading signed, to
+    one decimal, in the SNR scale that each other surface of the app uses. A ``text`` lane
+    draws its string on the left, padded to the lane, or a faint ``—`` where there is none.
     """
     value = getattr(row, lane.field, None)
     if lane.kind == "text":
@@ -415,7 +469,13 @@ def _lane_cell(row: ContactRow, lane: ContactLane) -> Text:
         if value is None:
             return Text(f"{'—':>{lane.width}}", style="faint")
         return Text(f"{min(value, 99999):>{lane.width}}", style="muted")
+    if lane.kind == "snr":
+        if value is None:
+            return Text(f"{'—':>{lane.width}}", style="muted")
+        return Text(f"{value:+.1f}".rjust(lane.width), style=snr_style(float(value)))
     secs = age_seconds(value)
+    if secs is None:
+        return Text(f"{lane.absent:>{lane.width}}", style=_recency_style(None))
     return Text(f"{format_age(secs):>{lane.width}}", style=_recency_style(secs))
 
 
@@ -503,7 +563,9 @@ def _lane(
     """
     if row.you:
         return _you_lane(row, name_w, prefix_bytes, hash_w, lanes, lock_w)
-    mark, mark_style = NODE_GLYPHS.get(row.node_type, DEFAULT_GLYPH)
+    mark, mark_style = (
+        UNKNOWN_MARK if row.unknown else NODE_GLYPHS.get(row.node_type, DEFAULT_GLYPH)
+    )
     text = Text(_lock_cell(row, lock_w), no_wrap=True, overflow="ellipsis")
     text.append(mark, style=mark_style)
     text.append(" ")
@@ -536,11 +598,11 @@ def _ordered(
 
     The two fixed columns sort on their own values: name A→Z, and ``hash`` by the displayed
     key (ascending = ``0`` → ``f``). Each other column is a declared :class:`ContactLane`,
-    and sorts by the metric of the lane. A ``count`` lane sorts by its count, and an ``age``
-    lane sorts by *age in seconds*. Thus ascending puts the newest first, and a row with no
-    value at all collects at the old end in both directions. Because of this property,
-    ``heard``, ``traced``, and ``archived`` behave the same, and no line of code names any
-    of them.
+    and sorts by the metric of the lane. A ``count`` lane sorts by its count, an ``snr``
+    lane by its reading, and an ``age`` lane by *age in seconds*. Thus ascending puts the
+    newest first, and a row with no value at all collects at the old end in both
+    directions. Because of this property, ``heard``, ``traced``, and ``archived`` behave
+    the same, and no line of code names any of them.
 
     A pre-sort by name, ascending, is the stable tiebreak. Thus two contacts with the same
     metric keep an A→Z order in both directions, and do not change places with the primary
@@ -569,6 +631,11 @@ def _ordered(
             return (0, str(value).casefold()) if value else (1, "")
         if lane.kind == "count":
             return value or 0
+        if lane.kind == "snr":
+            # A reading that the node did not give is the weakest value there is, so it
+            # collects at the weak end in both directions, as a node that was never heard
+            # does in an age column.
+            return value if value is not None else float("-inf")
         secs = age_seconds(value)
         return secs if secs is not None else float("inf")
 

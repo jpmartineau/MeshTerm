@@ -42,14 +42,14 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from rich.cells import cell_len
 from rich.text import Text
 
-from ..core.models import Contact
+from ..core.models import Contact, NeighbourInfo
 from ..core.remote_config import (
     DISCOVERED_CATEGORY,
     NEVER_STORED,
@@ -70,6 +70,13 @@ from ..core.remote_config import (
     validate_value,
     write_plan,
 )
+from .contactlist import (
+    NEIGHBOUR_LANES,
+    NEIGHBOUR_SORT_COLUMNS,
+    NEIGHBOUR_SORT_OPENS_ASCENDING,
+    ContactListScreen,
+    ContactRow,
+)
 from .menus import (
     PICK_LOCATION_HELP,
     PICK_LOCATION_LABEL,
@@ -84,9 +91,10 @@ from .menus import (
     section_heading,
 )
 from .trace_screen import TracingDialog
-from .tui import Choice, Separator
+from .tui import CANCEL, Choice, Separator
 from .tui.select import DeleteRequest, SelectScreen, splice_hint
 from .tui.spinner import Spinner, spinner_interval
+from .widgets import ContactsSort, _key_id
 
 if TYPE_CHECKING:
     from ..context import AppContext
@@ -107,6 +115,7 @@ _CLOCK = "__clock__"
 _PASSWORD = "__password__"
 _REBOOT = "__reboot__"
 _REGIONS = "__regions__"
+_NEIGHBOURS = "__neighbours__"
 _APPLY = "__apply__"
 _CANCEL = "__cancel__"
 
@@ -398,6 +407,8 @@ async def _admin_session(ctx: AppContext, device: Device, node: Contact) -> dict
                 from .region_editor import open_region_editor
 
                 await open_region_editor(ctx, device, node)
+            elif choice == _NEIGHBOURS:
+                await _neighbours(ctx, device, node)
             elif choice == _ADVERT:
                 await _simple_action(
                     ctx,
@@ -518,6 +529,7 @@ def _menu_items(node: Contact, cache: dict, pending: dict[str, str]) -> tuple[st
         ("↻", "Read settings", "Fetch every value from the node, one paced read", _READ),
         ("⌨", "Command line…", "Talk to the node's CLI directly", _CLI),
         ("🔖", "Regions…", "Which scoped floods it relays", _REGIONS),
+        ("⚡", "Neighbours…", "The nodes it hears directly, and how well", _NEIGHBOURS),
         ("📡", "Send advert…", "Have the node announce itself now", _ADVERT),
         ("🕒", "Sync clock…", "Set the node's clock over the mesh", _CLOCK),
         ("🔐", "Admin password…", "Change the node's admin password", _PASSWORD),
@@ -1018,6 +1030,169 @@ async def _run_under_dialog(ctx: AppContext, title: str, work) -> bool:
             pass
         session.pop(dialog)
     return aborted
+
+
+# --- the neighbour table ----------------------------------------------------------
+
+
+def neighbours_picker(
+    node: Contact,
+    entries: Sequence[NeighbourInfo],
+    *,
+    contacts: list[Contact],
+    prefix_bytes: int,
+) -> ContactListScreen:
+    """Build the neighbour table of a node as the shared contact list, floated as a dialog.
+
+    It is the Trace-target picker in a different subject: the same lane layout, the same
+    Ctrl+arrow sort ring, the same type-to-filter, the same node hues, type marks, and key
+    lane. Only the two middle lanes differ, because here the readings belong to the
+    *remote* node and not to us. ``SNR`` is what that node measured, and ``HEARD`` is how
+    long ago it last received from the neighbour (refer to
+    :data:`~meshterm.ui.contactlist.NEIGHBOUR_LANES`). The list opens on ``SNR``, with the
+    strongest link first.
+
+    A neighbour that the device holds as a contact carries that contact, so Enter opens the
+    node page that the Contacts list opens. A neighbour that nothing can name gets a
+    contact built from its key prefix, so the row still opens. The page then shows what the
+    stored history knows about that key, which is the question that a reader has about a
+    node that their own radio never heard.
+
+    Args:
+        node: The node that gave the table. Its name is the subject of the title.
+        entries: The table as the node gave it.
+        contacts: The contacts of the device, to name each key prefix.
+        prefix_bytes: The width in bytes of the hash that the routing of the mesh
+            addresses, to light at the start of each key.
+
+    Returns:
+        The floating picker. Each row resolves with the :class:`Contact` of its neighbour.
+    """
+    picker = ContactListScreen(
+        f"Neighbours — {node.name}",
+        rows=[_neighbour_row(entry, contacts) for entry in entries],
+        prefix_bytes=prefix_bytes,
+        sort=ContactsSort.from_name("snr", NEIGHBOUR_SORT_COLUMNS, NEIGHBOUR_SORT_OPENS_ASCENDING),
+        lanes=NEIGHBOUR_LANES,
+    )
+    # The table is an answer that the admin page asked for, not a page of its own. Thus it
+    # floats over that page, exactly as the Trace-target picker floats over the menu.
+    picker.floating = True
+    return picker
+
+
+def _neighbour_row(entry: NeighbourInfo, contacts: list[Contact]) -> ContactRow:
+    """One row of the neighbour table: its contact if the device has one, or else a stub.
+
+    The node gives a key prefix, so the match is by prefix in the two directions (the
+    device can hold a contact that is itself only a prefix). With no match, the row carries
+    a contact of that prefix alone. It has no name, so the list draws the key prefix in the
+    grey of an unidentified node, after the ``○`` unknown type mark.
+    """
+    key = entry.node.lower().removeprefix("0x")
+    found = next(
+        (
+            c
+            for c in contacts
+            for held in ((c.public_key or c.key_prefix or "").lower().removeprefix("0x"),)
+            if held and (held.startswith(key) or key.startswith(held))
+        ),
+        None,
+    )
+    contact = found or Contact(name="", key_prefix=key)
+    return ContactRow(
+        value=contact,
+        name=found.name if found and found.name else None,
+        key=contact.public_key or contact.key_prefix or key,
+        node_type=contact.node_type,
+        snr=entry.snr,
+        heard_by_node=entry.heard_at,
+        unknown=found is None,
+    )
+
+
+async def _neighbours(ctx: AppContext, device: Device, node: Contact) -> None:
+    """Ask the node for its neighbour table, keep the snapshot, and open it as a list.
+
+    The neighbour table is what the node hears for itself: one entry for each node whose
+    packets reach it directly. It is a second point of view on the mesh, and it shows
+    links, and whole nodes, that our own radio never received anything from.
+
+    The admin session of this page is already open, so this sends no login. The firmware
+    gives the table in pages of approximately 25 entries, so the fetch can take some
+    seconds. Thus it runs under the same spinner dialog with Abort that the reads use. The
+    snapshot goes to the repository, where it becomes evidence for the topology that the
+    mesh walk, the path composer, and the trace scenarios read. Thus a fetch from this page
+    helps the same screens as a fetch from the path composer of the trace.
+
+    The list is a hub: it stays pushed while a node page opens above it. Thus Esc from that
+    page lands on the same list, at the same row, in the same sort.
+
+    Args:
+        ctx: The shared application context.
+        device: The connected companion.
+        node: The repeater or room server, which this page is already logged in to.
+    """
+    from .node_detail_screen import open_node_detail
+
+    session = ctx.ui.session
+    title = f"Neighbours — {node.name}"
+    run_id = ctx.repo.start_run(
+        "repeater-admin", {"node": node.name, "mode": "neighbours"}, ctx.profile_name
+    )
+    entries: list[NeighbourInfo] = []
+    done = False
+
+    async def work(dialog: TracingDialog) -> None:
+        nonlocal entries, done
+        dialog.status = f"asking {node.name} for its neighbours…"
+        session.invalidate()
+        entries = await device.fetch_neighbours(node)
+        done = True
+
+    aborted = await _run_under_dialog(ctx, title, work)
+    if aborted or not done:
+        # A failure already showed its own dialog (refer to _run_under_dialog). A second
+        # dialog with an empty list would say the node answered, and it did not.
+        ctx.repo.finish_run(run_id, "error", {"error": "aborted" if aborted else "no reply"})
+        return
+    # The snapshot is keyed by the node, so a node with no key at all stores nothing.
+    # (A managed node always has one, because the login addresses it.)
+    node_id = _key_id(node.public_key or node.key_prefix or "")
+    if node_id:
+        ctx.repo.record_neighbours(run_id, node_id, entries)
+    ctx.repo.finish_run(run_id, "ok", {"node": node.name, "neighbours": len(entries)})
+
+    if not entries:
+        # Checked on real firmware: an empty table is a normal answer. A repeater forgets
+        # its neighbours when it reboots, and it learns them again from the adverts that
+        # arrive. An empty list to sort and filter is a worse answer than a sentence.
+        await session.message_dialog(
+            Text(
+                "no neighbours — it learns them again from the adverts it hears",
+                style="muted",
+            ),
+            title=title,
+        )
+        return
+
+    try:
+        contacts = await ctx.devstate.contacts()
+    except Exception:  # noqa: BLE001 - the key prefixes alone still make a usable list
+        contacts = []
+    try:
+        prefix_bytes = int(await ctx.devstate.routing_prefix_bytes())
+    except Exception:  # noqa: BLE001 - an optional read. Without it, nothing is lit.
+        prefix_bytes = 0
+    picker = neighbours_picker(node, entries, contacts=contacts, prefix_bytes=prefix_bytes)
+    async with session.stay(picker) as visit:
+        while True:
+            chosen = await visit.result()
+            if chosen is CANCEL or chosen is None:
+                return
+            # To look, not to manage: the verbs that remove a contact belong to the list
+            # that the contact is in, and this list is the table of another node.
+            await open_node_detail(ctx, chosen, manage=False, lock=True)
 
 
 # --- one-shot actions ------------------------------------------------------------
