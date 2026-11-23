@@ -300,6 +300,15 @@ LEDS = Path("/sys/class/leds")
 #: the chip does its own reset after this.
 POWER_SETTLE_S = 0.1
 
+#: How long the expander of a board gets to answer, after the header is powered on, and
+#: before MeshTerm says that no board is attached. The first read comes after
+#: :data:`POWER_SETTLE_S`, which is sufficient on the boards that we have. A board with a
+#: slower power rail answers a moment later, and that must not read as an absent board.
+#: :data:`PI4IO_RETRY_S` is the time between two tries, which is short, because a board
+#: that is ready answers at once.
+PI4IO_WAIT_S = 1.0
+PI4IO_RETRY_S = 0.05
+
 #: ``I2C_SLAVE``: point the open ``/dev/i2c-*`` at one device. The kernel refuses it
 #: (``EBUSY``) while a kernel driver is bound to that address. This is the correct answer,
 #: because then the device is not ours to use.
@@ -342,6 +351,43 @@ def restore_leds(previous: list[tuple[Path, str]]) -> None:
             log.warning("could not put %s back to %s: %s", path, before, exc)
 
 
+def _expander_id(fd: int, address: int, path: Path) -> int:
+    """Read the ID register of the expander at ``address``, and try again until it answers.
+
+    The caller powers the header of the board a short time before this read. A board whose
+    power rail is slower than :data:`POWER_SETTLE_S` refuses the first read and answers
+    correctly a moment later. For this reason the function tries again until
+    :data:`PI4IO_WAIT_S` is spent, and calls the board absent only then.
+
+    The log line carries the error of the last try. The sentence that the user reads cannot
+    carry it, because a refused address and a broken bus are the same thing to that user.
+    They are not the same thing to us, and only the log can tell them apart afterwards.
+
+    Args:
+        fd: The open bus, already pointed at the address.
+        address: The address of the expander, for the message.
+        path: The bus device file, for the message.
+
+    Returns:
+        The byte in the ID register.
+
+    Raises:
+        NodeError: ``absent``, when nothing answered in the time above.
+    """
+    deadline = time.monotonic() + PI4IO_WAIT_S
+    while True:
+        try:
+            os.write(fd, bytes([_PI4IO_ID]))
+            return os.read(fd, 1)[0]
+        except OSError as exc:
+            if time.monotonic() >= deadline:
+                log.warning(
+                    "no answer at %#04x on %s after %.1fs: %s", address, path, PI4IO_WAIT_S, exc
+                )
+                raise NodeError("absent", f"nothing answers at {address:#04x} on {path}") from None
+            time.sleep(PI4IO_RETRY_S)
+
+
 def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev")) -> None:
     """Drive the ``high`` pins of a PI4IOE5V6408 high as outputs, and keep the rest as inputs.
 
@@ -362,11 +408,7 @@ def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev"
             fcntl.ioctl(fd, _I2C_SLAVE, address)
         except OSError as exc:
             raise NodeError("busy", f"{address:#04x} on {path} is held: {exc}") from None
-        try:
-            os.write(fd, bytes([_PI4IO_ID]))
-            ident = os.read(fd, 1)[0]
-        except OSError:
-            raise NodeError("absent", f"nothing answers at {address:#04x} on {path}") from None
+        ident = _expander_id(fd, address, path)
         if ident >> 5 != _PI4IO_MAKER:
             raise NodeError(
                 "absent", f"{address:#04x} on {path} is not a PI4IOE5V6408 (ID {ident:#04x})"
@@ -686,6 +728,10 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
     state.mkdir(parents=True, exist_ok=True)
     wiring = dict(config.get("wiring") or {})
     seed = dict(config.get("seed") or {})
+
+    # The log must say which wiring the node used. A board problem is reported with this
+    # file, and the wiring can come from a profile that the reporter wrote.
+    log.info("node wiring: %s", json.dumps(wiring, sort_keys=True))
 
     bus, cs = int(wiring.get("bus_id", 0)), int(wiring.get("cs_id", 0))
     _check_device(f"/dev/spidev{bus}.{cs}", "no-spi", "SPI overlay")

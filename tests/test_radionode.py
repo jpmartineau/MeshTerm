@@ -16,6 +16,7 @@ import ast
 import asyncio
 import dataclasses
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -181,6 +182,59 @@ def test_an_expander_on_a_missing_bus_is_named(tmp_path: Path) -> None:
     with pytest.raises(radionode.NodeError) as err:
         radionode.drive_pi4io(1, 0x43, [0], dev=tmp_path)
     assert err.value.kind == "no-i2c"
+
+
+#: A number that stands for the open I2C bus in the two tests below. The tests put their
+#: own ``os.write`` and ``os.read`` in front of the real ones, and those answer for this
+#: number alone. Each other file in the process, the capture of pytest included, goes
+#: through to the real function.
+_BUS_FD = 9001
+
+
+def test_a_slow_expander_gets_more_than_one_try(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A board whose power rail is slow answers a later read, and is attached after all."""
+    real_write, real_read = os.write, os.read
+    tries: list[bytes] = []
+
+    def write(fd: int, data: bytes) -> int:
+        if fd != _BUS_FD:
+            return real_write(fd, data)
+        tries.append(data)
+        return len(data)
+
+    def read(fd: int, count: int) -> bytes:
+        if fd != _BUS_FD:
+            return real_read(fd, count)
+        if len(tries) < 3:
+            raise OSError(121, "Remote I/O error")
+        return bytes([0xA2])
+
+    monkeypatch.setattr(os, "write", write)
+    monkeypatch.setattr(os, "read", read)
+    monkeypatch.setattr(radionode, "PI4IO_RETRY_S", 0)
+    assert radionode._expander_id(_BUS_FD, 0x43, Path("/dev/i2c-1")) == 0xA2
+    assert len(tries) == 3, "it read the ID register again until the board answered"
+
+
+def test_an_expander_that_never_answers_is_absent_and_the_log_says_why(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The user reads that nothing is there. Only the log says what the bus answered."""
+    real_write = os.write
+
+    def write(fd: int, data: bytes) -> int:
+        if fd != _BUS_FD:
+            return real_write(fd, data)
+        raise OSError(121, "Remote I/O error")
+
+    monkeypatch.setattr(os, "write", write)
+    monkeypatch.setattr(radionode, "PI4IO_WAIT_S", 0)
+    with caplog.at_level(logging.WARNING, logger="radionode"):
+        with pytest.raises(radionode.NodeError) as err:
+            radionode._expander_id(_BUS_FD, 0x43, Path("/dev/i2c-1"))
+    assert err.value.kind == "absent"
+    assert "nothing answers at 0x43" in str(err.value), "the sentence of the user is unchanged"
+    assert "Remote I/O error" in caplog.text, "the log keeps the error of the bus"
 
 
 def test_a_board_with_no_switches_prepares_nothing() -> None:

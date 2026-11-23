@@ -63,7 +63,7 @@ from ..core.discovery import (
     tcp_device,
 )
 from ..core.spiradio import spi_radios, without_radio_ports
-from ..persistence.logging import log_file_for
+from ..persistence.logging import get_logger, log_file_for
 from .logo import load_logo
 from .menus import Lane, align_icons, column_header
 from .tui import Choice, DeleteRequest, KeyRequest, Separator
@@ -332,7 +332,10 @@ async def _smoke_test(
             continue
         except DeviceCommandError as exc:
             # A different failure that the user can act on (not a PIN). Show its remedy, then
-            # go back to the list.
+            # go back to the list. The log keeps the failure also when the dialog says all
+            # that the log would say, because a user who reports a problem sends the log file,
+            # and the dialog is gone long before that.
+            get_logger().warning("%s did not connect (%s): %s", name, type(exc).__name__, exc)
             notice = connect_failure_text(exc)
             notice.append("\nChoose another device.")
             await ui.notify_startup(notice, title="Can't connect yet", banner=load_logo())
