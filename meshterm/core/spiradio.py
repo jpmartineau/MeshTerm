@@ -408,6 +408,12 @@ def board_models(wiring: SpiWiring) -> tuple[str, str]:
     """
     for radio in BUILTIN_RADIOS:
         if radio.name and radio.wiring.spidev == wiring.spidev and radio.present():
+            if radio.without_expander and wiring.pi4io_bus < 0:
+                # This wiring never looks at the expander, which is what tells the two
+                # revisions apart. A profile that drops it is the usual way here. The name
+                # of the family is then the most that is true, as it is on the device
+                # screen before anything is connected.
+                return (radio.name, "")
             return (radio.with_expander or radio.name, radio.without_expander)
     return ("", "")
 

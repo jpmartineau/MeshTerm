@@ -38,7 +38,7 @@ The UX is a bit different on the PicoCalc's 16-colour 53-column screen layout, b
 
 ### M5Stack Cardputer Zero
 The **Cardputer Zero** is the easiest of the three: MeshTerm is in **M5Stack**'s app store, so installing it takes a few keypresses. Both models work, the standard **Cardputer Zero** and the **Cardputer Zero Lite**.
-- Add the **Cap LoRa-1262**, and MeshTerm runs the mesh node itself, straight over SPI, just like on the uConsole. The Cap's GPS works too.
+- Add a LoRa Cap, and MeshTerm runs the mesh node itself, straight over SPI, just like on the uConsole. Both of M5Stack's Caps work, the **Cap LoRa-1262** and the older **Cap LoRa868**, and MeshTerm works out which one you have. The Cap's GPS works too.
 - Power the Cardputer off before you plug in or remove a Cap — the LoRa one included. M5Stack doesn't support hot-swapping Caps, and says it may cause the device to malfunction.
 - Put the antenna on the Cap before you power it on. M5Stack warns that the radio can be permanently damaged without it.
 

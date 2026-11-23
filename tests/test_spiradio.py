@@ -295,6 +295,8 @@ def test_the_node_is_given_the_model_of_each_revision(cardputer: Path) -> None:
     tweaked = replace(spiradio.CARDPUTER_ZERO_CAP, use_dio3_tcxo=False)
     assert spiradio.board_models(tweaked) == ("Cap LoRa-1262", "Cap LoRa868"), "a profile of it"
     assert spiradio.board_models(SpiWiring()) == ("", "")  # the AIO: no name to give
+    blind = replace(spiradio.CARDPUTER_ZERO_CAP, pi4io_bus=-1)
+    assert spiradio.board_models(blind) == ("Cap LoRa", ""), "a wiring that never looks cannot say"
     cardputer.rmdir()
     assert spiradio.board_models(spiradio.CARDPUTER_ZERO_CAP) == ("", "")  # another Pi
 
