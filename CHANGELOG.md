@@ -3,11 +3,22 @@
 This page lists the notable changes to MeshTerm. The newest version is first.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The
-version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). One
-rule of SemVer applies to a leading zero: while the major version is `0`, a **minor** bump
-can change how things behave. It does not only add new things.
+version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The
+releases below 1.0.0 used one more rule: while the major version is `0`, a **minor** bump
+can change how things behave. From 1.0.0, a change that breaks the command line, the
+`--json` answers, the configuration keys, or the preference names waits for the next major
+version.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-23
+
+**MeshTerm reaches 1.0.** The command line, its `--json` answers, the configuration keys,
+and the preference names are promises from now on. A change that breaks one of them waits
+for 2.0. This release also gives MeshTerm sounds for the messages that you want to know
+about, a device page that reports everything the companion knows, the neighbours that a
+repeater hears, a relay mark on each channel message that you send, and the older LoRa Cap
+of the Cardputer Zero.
 
 ### Added
 
@@ -56,12 +67,49 @@ can change how things behave. It does not only add new things.
   PicoCalc has no sound, so there each notification flashes. The idea came from the
   MeshTerm Discord.
 
+- **MeshTerm drives the older LoRa Cap of the Cardputer Zero.** M5Stack made two LoRa
+  Caps. The newer Cap LoRa-1262 has an antenna switch, and a small chip that turns the
+  switch on. The older Cap LoRa868 has the same SX1262 radio on the same pins, and no such
+  chip, because it has no switch. MeshTerm asked for that chip on every Cardputer Zero, so
+  an owner of the older Cap read "nothing answers at 0x43 on /dev/i2c-1" and could not
+  connect at all. Now MeshTerm looks for the chip, and where none answers it asks the radio
+  what it is. An SX1262 that gives its name is the older Cap. The device screen calls the
+  row **Cap LoRa** before you connect, because nothing can know which Cap is attached until
+  the node runs, and after that it names the Cap that answered. A Cardputer Zero with no Cap
+  at all still says that no radio answered. Found on the MeshTerm Discord.
+- **A repeater's admin page lists the neighbours that it hears.** A repeater keeps a table
+  of the nodes that it receives directly. Until now the only way to that table was three
+  steps into the trace path composer, and the answer dissolved into the evidence of a route.
+  The admin page has a **Neighbours** row, and the list it opens is a full screen with the
+  lanes, the sort, and the type-to-filter of the Contacts list. Two of its lanes belong to
+  the remote node: SNR is what that node measured, and HEARD is how long ago that node
+  received from the neighbour. Enter opens the node page of a neighbour, also one that
+  nothing can name, which then shows what the stored history knows about a node that your
+  own radio never heard.
+- **A radio with no channel gets the standard Public channel at startup.** A radio that
+  arrives with no channel cannot send anywhere, because each send needs a slot. The empty
+  Chat picker read as "nobody is here". MeshTerm now writes the Public channel that MeshCore
+  itself ships, on slot 0, and says so on the splash. The new *Public on empty device*
+  preference (`public_on_empty_device`) turns it off.
+
 ### Changed
 
 - **Ctrl+E shows or hides the pairing PIN.** It was Ctrl+S, which now mutes the sounds.
 
 ### Fixed
 
+- **A filter never hides what a page does.** Find-as-you-type searches the data of a list:
+  the contacts, the settings, the channel slots, the queued messages, the records. A row
+  that acts on the page is not data. A typed query used to take the Apply and Back pair of
+  an editor, the Actions sections of Device config and of the repeater admin, the Add rows
+  of Channels and Outbound paths, the archive rows of the Contacts list, and the actions of
+  eight other pages. Apply has no key of its own, so a filter that hid it left it reachable
+  only by an Esc that nothing on the screen named. Those rows now stay while you type.
+- **The name "Public" no longer makes a channel that nobody hears.** `#Public` is not the
+  standard Public channel. Its key comes from its name, so its hash is different and no
+  other node is on it. The two add rows sit side by side, and Public is the obvious word to
+  type into "Public channel name:". The name now asks again and offers the standard channel,
+  without refusing the name.
 - **Two channel messages with the same text no longer share their copies.** The paths
   dialog matched a copy of your channel message by its text in a window of 15 minutes. Two
   "test" messages a few minutes apart then showed the copies of both. Now a copy of your
@@ -971,7 +1019,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v1.0.0
 [0.13.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.13.0
 [0.12.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.12.0
 [0.11.5]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.11.5
