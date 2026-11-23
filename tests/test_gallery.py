@@ -1863,7 +1863,7 @@ def _repeater_admin(cols: int, rows: int) -> Screen:
 
 
 def _repeater_neighbours(cols: int, rows: int) -> Screen:
-    """The neighbour table of a repeater, floated as the Trace-target picker is.
+    """The neighbour table of a repeater: a full screen in the shared contact-list lanes.
 
     It has the widest shapes that the list can draw: a long name, a node that nothing can
     name (which reads as its grey key prefix, after the unknown type mark), and an entry

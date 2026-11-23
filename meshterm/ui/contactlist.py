@@ -32,8 +32,10 @@ say "and if it's the trace picker…".
 longest place, and the full key. No value is cut to fit the terminal. A row that is wider
 than the terminal pans: ←→ slide the column header and all the rows by one shared shift,
 with the mark column and the name held still (refer to
-:attr:`~meshterm.ui.tui.select.Choice.pans`). The other lists can be floating dialogs (the
-Trace picker), so they keep the lanes that fit the terminal.
+:attr:`~meshterm.ui.tui.select.Choice.pans`). The other lists keep the lanes that fit the
+terminal. The Trace picker floats as a dialog, and the width of a dialog comes from the
+width of its rows. The neighbour table of a repeater has one lane only of an unknown
+width, and that lane is the key.
 
 **A list with the** ``PLACE`` **lane reads its places from the place service.** The caller
 gives the service (``places``), and the list fills the place of each row from the key of

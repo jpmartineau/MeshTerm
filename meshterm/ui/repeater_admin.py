@@ -1042,7 +1042,7 @@ def neighbours_picker(
     contacts: list[Contact],
     prefix_bytes: int,
 ) -> ContactListScreen:
-    """Build the neighbour table of a node as the shared contact list, floated as a dialog.
+    """Build the neighbour table of a node as the shared contact list, on a full screen.
 
     It is the Trace-target picker in a different subject: the same lane layout, the same
     Ctrl+arrow sort ring, the same type-to-filter, the same node hues, type marks, and key
@@ -1051,6 +1051,13 @@ def neighbours_picker(
     long ago it last received from the neighbour (refer to
     :data:`~meshterm.ui.contactlist.NEIGHBOUR_LANES`). The list opens on ``SNR``, with the
     strongest link first.
+
+    It is a **page**, not a dialog (JP, 2026-11-22). The reader is in it: they sort it,
+    filter it, and open a node from it. It does not pan (``pan=False``, the default),
+    unlike the two other full-screen contact lists. Panning earns its cells where a lane
+    holds text of an unknown width (the ``PLACE`` of the Contacts list). Here each middle
+    lane is five cells, so the only value that the terminal can cut is the key, and a key
+    cut at the edge reads better than a short key padded to the width of a 64-hex lane.
 
     A neighbour that the device holds as a contact carries that contact, so Enter opens the
     node page that the Contacts list opens. A neighbour that nothing can name gets a
@@ -1066,18 +1073,20 @@ def neighbours_picker(
             addresses, to light at the start of each key.
 
     Returns:
-        The floating picker. Each row resolves with the :class:`Contact` of its neighbour.
+        The page. Each row resolves with the :class:`Contact` of its neighbour.
     """
+    count = len(entries)
     picker = ContactListScreen(
-        f"Neighbours — {node.name}",
+        f"Neighbours — {node.name} · {count} node{'' if count == 1 else 's'}",
         rows=[_neighbour_row(entry, contacts) for entry in entries],
         prefix_bytes=prefix_bytes,
         sort=ContactsSort.from_name("snr", NEIGHBOUR_SORT_COLUMNS, NEIGHBOUR_SORT_OPENS_ASCENDING),
         lanes=NEIGHBOUR_LANES,
     )
-    # The table is an answer that the admin page asked for, not a page of its own. Thus it
-    # floats over that page, exactly as the Trace-target picker floats over the menu.
-    picker.floating = True
+    # On a narrow frame the full title costs the way out of the title bar ("Esc back"
+    # sheds to "Esc"). The short form keeps the count, which is the part the reader
+    # cannot read off the rows that fit.
+    picker.short_title = f"Neighbours · {count}"
     return picker
 
 
@@ -1125,8 +1134,9 @@ async def _neighbours(ctx: AppContext, device: Device, node: Contact) -> None:
     mesh walk, the path composer, and the trace scenarios read. Thus a fetch from this page
     helps the same screens as a fetch from the path composer of the trace.
 
-    The list is a hub: it stays pushed while a node page opens above it. Thus Esc from that
-    page lands on the same list, at the same row, in the same sort.
+    The list is a full screen, and a hub: it stays pushed while a node page opens above it.
+    Thus Esc from that page lands on the same list, at the same row, in the same sort, and
+    a second Esc goes back to the admin page.
 
     Args:
         ctx: The shared application context.
