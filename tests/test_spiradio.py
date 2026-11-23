@@ -263,7 +263,13 @@ def cardputer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "BUILTIN_RADIOS",
         (
             spiradio.BuiltinRadio("", SpiWiring()),
-            spiradio.BuiltinRadio("Cap LoRa-1262", spiradio.CARDPUTER_ZERO_CAP, marker=str(marker)),
+            spiradio.BuiltinRadio(
+                "Cap LoRa",
+                spiradio.CARDPUTER_ZERO_CAP,
+                marker=str(marker),
+                with_expander="Cap LoRa-1262",
+                without_expander="Cap LoRa868",
+            ),
         ),
     )
     return marker
@@ -272,7 +278,7 @@ def cardputer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_the_cardputer_cap_is_listed_with_no_profile(cardputer: Path) -> None:
     """On a Cardputer Zero, the Cap is a radio like the AIO: it is present, named, and wired."""
     radios = spiradio.spi_radios({})
-    assert [(d.port, d.name) for d in radios] == [("/dev/spidev0.1", "Cap LoRa-1262")]
+    assert [(d.port, d.name) for d in radios] == [("/dev/spidev0.1", "Cap LoRa")]
     assert radios[0].spi == spiradio.CARDPUTER_ZERO_CAP
 
 
@@ -283,14 +289,24 @@ def test_a_bare_spidev_node_is_not_a_cardputer(cardputer: Path) -> None:
     assert spiradio.builtin_wiring("/dev/spidev0.1") is None
 
 
-def test_the_cap_reports_itself_by_name(cardputer: Path) -> None:
-    """The model of the node is the name of the board: the Cap, also under a changed profile."""
-    assert spiradio.board_name(spiradio.CARDPUTER_ZERO_CAP) == "Cap LoRa-1262"
+def test_the_node_is_given_the_model_of_each_revision(cardputer: Path) -> None:
+    """The node sees which Cap is attached. Thus the parent sends it both names."""
+    assert spiradio.board_models(spiradio.CARDPUTER_ZERO_CAP) == ("Cap LoRa-1262", "Cap LoRa868")
     tweaked = replace(spiradio.CARDPUTER_ZERO_CAP, use_dio3_tcxo=False)
-    assert spiradio.board_name(tweaked) == "Cap LoRa-1262"
-    assert spiradio.board_name(SpiWiring()) == ""  # the node of the AIO: no board name to give
+    assert spiradio.board_models(tweaked) == ("Cap LoRa-1262", "Cap LoRa868"), "a profile of it"
+    assert spiradio.board_models(SpiWiring()) == ("", "")  # the AIO: no name to give
     cardputer.rmdir()
-    assert spiradio.board_name(spiradio.CARDPUTER_ZERO_CAP) == ""  # another Pi
+    assert spiradio.board_models(spiradio.CARDPUTER_ZERO_CAP) == ("", "")  # another Pi
+
+
+def test_the_shipped_table_knows_both_revisions_of_the_cap() -> None:
+    """The fixture above copies the table. This keeps the table itself from drifting."""
+    cap = next(r for r in spiradio.BUILTIN_RADIOS if r.wiring is spiradio.CARDPUTER_ZERO_CAP)
+    assert (cap.name, cap.with_expander, cap.without_expander) == (
+        "Cap LoRa",
+        "Cap LoRa-1262",
+        "Cap LoRa868",
+    )
 
 
 #: Each mark of a uConsole, as the CM5 uConsole of JP showed them.
@@ -324,7 +340,7 @@ def test_the_aio_is_named_on_a_uconsole(uconsole: set) -> None:
     """When each mark of a uConsole is present, the AIO is the uConsole AIO."""
     radios = spiradio.spi_radios({})
     assert [(d.port, d.name) for d in radios] == [("/dev/spidev1.0", "uConsole AIO")]
-    assert spiradio.board_name(SpiWiring()) == "uConsole AIO"
+    assert spiradio.board_models(SpiWiring()) == ("uConsole AIO", "")
 
 
 @pytest.mark.parametrize("missing", _UCONSOLE_MARKS, ids=str)
@@ -333,14 +349,14 @@ def test_one_missing_mark_is_enough_to_doubt_it(uconsole: set, missing: object) 
     uconsole.discard(missing)
     radios = spiradio.spi_radios({})
     assert [(d.port, d.name) for d in radios] == [("/dev/spidev1.0", None)]
-    assert spiradio.board_name(SpiWiring()) == ""
+    assert spiradio.board_models(SpiWiring()) == ("", "")
 
 
 def test_the_keyboard_s_names_are_part_of_its_mark(uconsole: set) -> None:
     """1eaf:0024 is any LeafLabs Maple. Only the uConsole keyboard of ClockworkPi counts."""
     uconsole.discard(spiradio.UCONSOLE_KEYBOARD)
     uconsole.add(("1eaf", "0024", "LeafLabs", "Maple"))
-    assert spiradio.board_name(SpiWiring()) == ""
+    assert spiradio.board_models(SpiWiring()) == ("", "")
 
 
 def test_usb_devices_are_read_from_sysfs(tmp_path: Path) -> None:

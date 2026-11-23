@@ -267,6 +267,23 @@ def test_a_radio_that_does_not_start_says_the_useful_thing(
         assert str(error) == radionode.NO_RADIO, "one sentence for a radio that is not there"
 
 
+@pytest.mark.parametrize(
+    ("expander", "expected"),
+    [(True, "Cap LoRa-1262"), (False, "Cap LoRa868"), (None, "Cap LoRa-1262")],
+    ids=["found", "absent", "no-expander-in-wiring"],
+)
+def test_the_node_reports_the_revision_that_it_found(expander: bool | None, expected: str) -> None:
+    """The parent sends both names, because only the node can see which board answered."""
+    config = {"model": "Cap LoRa-1262", "model_without_expander": "Cap LoRa868"}
+    assert radionode.board_model(config, expander) == expected
+
+
+def test_a_board_with_one_revision_keeps_its_one_model() -> None:
+    """The AIO has no second name, and a board MeshTerm does not know has none at all."""
+    assert radionode.board_model({"model": "uConsole AIO"}, False) == "uConsole AIO"
+    assert radionode.board_model({}, False) == radionode.DEVICE_MODEL
+
+
 def test_a_chip_that_cannot_be_read_is_not_a_board() -> None:
     """A read that fails is the same answer as a read of nothing: no board is attached."""
 

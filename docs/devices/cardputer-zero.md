@@ -199,8 +199,11 @@ says that power without the antenna can permanently damage the radio.
 3. Push the Cap onto the expansion header at the back.
 4. Turn on the Cardputer Zero, and start MeshTerm.
 
-The device screen lists the Cap as **Cap LoRa-1262**. `meshterm --spi` also reaches it from the
-command line.
+The device screen lists the Cap as **Cap LoRa**. It cannot say more before it connects,
+because a radio on the SPI bus answers nothing until MeshTerm starts the node on it. After
+the first connection, the hardware column of the device screen names the Cap that
+answered: **Cap LoRa-1262**, or **Cap LoRa868** for the older one. `meshterm --spi` also
+reaches the Cap from the command line.
 
 The Cap has no MeshCore firmware of its own. It is only a radio chip. Thus, while MeshTerm
 is open, MeshTerm is the node, as it is on the AIO board of a uConsole. MeshTerm needs the

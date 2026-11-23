@@ -85,7 +85,7 @@ BEGIN_BACKOFF_S = 1.5
 
 #: The model string that the frame server reports for a radio on a board that MeshTerm
 #: does not know by name. MeshTerm shows it as the device model (the Cap reports
-#: "Cap LoRa-1262").
+#: "Cap LoRa-1262", or "Cap LoRa868" where it found no expander).
 DEVICE_MODEL = "MeshTerm SPI node"
 
 log = logging.getLogger("radionode")
@@ -513,6 +513,29 @@ def confirm_sx126x(lora: Any) -> None:
     log.info("the chip reports itself as %s", name)
 
 
+def board_model(config: dict, expander: bool | None) -> str:
+    """The model that the node reports for the board it is on.
+
+    The parent cannot know which revision of a board is attached, because nothing answers
+    on an SPI radio until the node runs. For this reason it sends the model of each
+    revision, and the node names the one that it found. A board with one revision has one
+    model, and the question does not come up.
+
+    Args:
+        config: The configuration from the parent (``model``, and
+            ``model_without_expander`` for a board that has a revision with no expander).
+        expander: What :func:`prepare_board` found (``False`` for an absent one).
+
+    Returns:
+        The model to report, or :data:`DEVICE_MODEL` for a board MeshTerm does not know.
+    """
+    if expander is False:
+        without = str(config.get("model_without_expander") or "")
+        if without:
+            return without
+    return str(config.get("model") or DEVICE_MODEL)
+
+
 def begin_failure(kind: str, detail: str, expander: bool | None) -> NodeError:
     """The error that a failed ``radio.begin()`` gives the user.
 
@@ -836,8 +859,8 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
     Args:
         config: ``state_dir``, ``wiring`` (the pins and switches of the board), ``seed``
             (name and radio settings for a node that has no ``prefs.json`` yet), and
-            ``model`` (the name of the board, reported as the device model. Without it,
-            :data:`DEVICE_MODEL`).
+            ``model`` and ``model_without_expander`` (the name of the board, reported as
+            the device model. Refer to :func:`board_model`).
         report: Sends the one status line to the parent.
 
     Returns:
@@ -878,7 +901,7 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
             seed,
             report,
             expander=board.expander,
-            model=str(config.get("model") or DEVICE_MODEL),
+            model=board_model(config, board.expander),
             models=models,
             sx1262=sx1262,
             companion_mod=companion_mod,

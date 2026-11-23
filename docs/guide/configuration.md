@@ -93,9 +93,11 @@ to install the library.
 
 **Two boards need no configuration.** The wiring of an AIO v1 is the MeshTerm default.
 Thus, when `/dev/spidev1.0` exists, the device screen lists it. The name is **uConsole AIO**
-on a uConsole, and **SPI radio** on any other machine. MeshTerm also includes the Cap
-LoRa-1262 of M5Stack on a Cardputer Zero. The device screen lists it as **Cap LoRa-1262**
-on a Cardputer Zero (refer to [the Cardputer Zero page](../devices/cardputer-zero.md#the-cap-lora-1262)).
+on a uConsole, and **SPI radio** on any other machine. MeshTerm also includes the LoRa
+Cap of M5Stack on a Cardputer Zero. The device screen lists it as **Cap LoRa**, because
+until MeshTerm connects, nothing can say which of the two Caps is attached. After it
+connects, the hardware column names the one that answered (refer to [the Cardputer Zero
+page](../devices/cardputer-zero.md#the-cap-lora-1262)).
 For either board, `meshterm --spi` reaches the radio. To add any other board, write a
 profile that states how the board is wired. A profile on the same `/dev/spidev*` replaces
 the wiring that MeshTerm includes.

@@ -345,12 +345,19 @@ class BuiltinRadio:
             marker.
         board: A test that only its machine passes, for a machine that has no single path
             of its own (:func:`is_uconsole`). ``None`` for no test.
+        with_expander: The model of the revision whose RF expander answers, for a board
+            that has two revisions. Empty where the board has one revision, and then
+            ``name`` is its model.
+        without_expander: The model of the revision that has no expander. Empty for a
+            board that must have one.
     """
 
     name: str
     wiring: SpiWiring
     marker: str = ""
     board: Callable[[], bool] | None = None
+    with_expander: str = ""
+    without_expander: str = ""
 
     def present(self) -> bool:
         """Whether this machine is its board: the SPI device file and all its signs are there."""
@@ -369,22 +376,40 @@ class BuiltinRadio:
 BUILTIN_RADIOS = (
     BuiltinRadio("uConsole AIO", SpiWiring(), board=is_uconsole),
     BuiltinRadio("", SpiWiring()),
-    BuiltinRadio("Cap LoRa-1262", CARDPUTER_ZERO_CAP, marker="/sys/class/leds/ext_5v_out"),
+    BuiltinRadio(
+        "Cap LoRa",
+        CARDPUTER_ZERO_CAP,
+        marker="/sys/class/leds/ext_5v_out",
+        with_expander="Cap LoRa-1262",
+        without_expander="Cap LoRa868",
+    ),
 )
 
 
-def board_name(wiring: SpiWiring) -> str:
-    """The name of the shipped board on which the radio of ``wiring`` is, or ``""`` for none.
+def board_models(wiring: SpiWiring) -> tuple[str, str]:
+    """The model of the board of ``wiring`` with its RF expander, and the one without it.
 
-    The node reports this name as its model. Thus the Cap shows as "Cap LoRa-1262", and the
-    AIO as "uConsole AIO", in all places that show the model of a device. The match uses
-    the SPI device file on the board of this machine, not the full wiring. Thus a profile
-    that changes the pins of the Cap is still the Cap.
+    The device screen names the **slot**: the name in :data:`BUILTIN_RADIOS`, which is the
+    family where a board has two revisions ("Cap LoRa"), because nothing answers until the
+    node runs. The **model** is what the node found there, and a board with two revisions
+    has two of them. The match uses the SPI device file on the board of this machine, not
+    the full wiring. Thus a profile that changes the pins of the Cap is still the Cap.
+
+    The node is given both models and names the one that it found (refer to
+    ``meshterm.core.radionode.board_model``). The Cap LoRa-1262 has the expander, and the
+    older Cap LoRa868 has none.
+
+    Args:
+        wiring: The wiring of the radio, of a profile or of a board.
+
+    Returns:
+        The model with the expander and the model without it. The second is empty for a
+        board that must have one, and both are empty where this machine is not its board.
     """
     for radio in BUILTIN_RADIOS:
         if radio.name and radio.wiring.spidev == wiring.spidev and radio.present():
-            return radio.name
-    return ""
+            return (radio.with_expander or radio.name, radio.without_expander)
+    return ("", "")
 
 
 def builtin_wiring(spidev: str) -> SpiWiring | None:
@@ -806,6 +831,10 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
     state.mkdir(parents=True, exist_ok=True)
     for line in await asyncio.to_thread(import_bridge_state, state):
         _log.info("spi radio: carried over %s", line)
+    # Both models go to the node, because only the node can see which revision of the board
+    # is attached. It answers with the one it found, and that model reaches the device
+    # screen through the store of remembered devices.
+    model, model_without_expander = board_models(wiring)
     config = {
         "state_dir": str(state),
         "wiring": {
@@ -832,7 +861,8 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
             "gps_baud": wiring.gps_baud,
         },
         "seed": {"node_name": node_name, **DEFAULT_SEED},
-        "model": board_name(wiring),
+        "model": model,
+        "model_without_expander": model_without_expander,
     }
     log_path = state / "node.log"
     _rotate(log_path)
