@@ -180,6 +180,7 @@ The Cardputer Zero has no LoRa radio built in. You can add one in three ways:
 | Radio | Status |
 | --- | --- |
 | **Cap LoRa-1262** add-on board from M5Stack | Works, with no setup. MeshTerm runs the mesh node itself while it is open, as it does on a uConsole. |
+| **Cap LoRa868**, the earlier add-on board | Works, with no setup. It is the same radio with no antenna switch (refer to [The older Cap LoRa868](#the-older-cap-lora868)). |
 | A MeshCore companion on USB | Expected to work as on any Linux computer. |
 | A MeshCore companion over Bluetooth | Expected to work as on any Linux computer. |
 
@@ -226,6 +227,45 @@ off the Cardputer Zero first.
 A new node starts with the US/Canada settings of MeshCore (910.525 MHz). In other regions,
 change the settings on **Device config** before you send anything. MeshTerm keeps the key,
 the contacts, and the channels of the node in `~/.meshterm/radio/spidev0.1/`.
+
+#### The older Cap LoRa868
+
+M5Stack made an earlier LoRa Cap, the **Cap LoRa868**. MeshTerm works with it as well,
+and you do nothing to make it work.
+
+The two Caps are almost the same board. Each one has an SX1262 radio and a GNSS
+receiver, on the same pins of the same 14-pin header. The newer Cap LoRa-1262 adds an
+antenna switch, and a small chip at I2C address `0x43` that turns that switch on. The
+older Cap has no antenna switch, so it has no such chip.
+
+MeshTerm finds out which Cap you have each time it connects:
+
+1. It powers the header.
+2. It looks for the switch chip at `0x43`, for one second.
+3. If the chip answers, the Cap is a Cap LoRa-1262, and MeshTerm turns the antenna
+   switch on.
+4. If nothing answers, MeshTerm starts the radio and asks the radio what it is. An
+   SX1262 that gives its name is the older Cap, and MeshTerm continues.
+
+Step 4 is the reason why a Cap that is absent, or that is not pushed fully onto the
+header, is still reported as absent. Only a radio that answers for itself is accepted.
+
+#### If MeshTerm says that it cannot find the radio
+
+Two messages are possible, and they mean different things.
+
+**"Nothing answers at 0x43 on /dev/i2c-1"** comes from a profile of your own that
+requires the switch chip. MeshTerm's own wiring for the Cap does not require it. Set
+`pi4io_required = false` in your profile, or remove the `pi4io_bus` line from it (refer
+to [Board wiring](uconsole.md#board-wiring)).
+
+**"No SX126x answered on the SPI bus"** means that no radio answered. Turn the Cardputer
+Zero off, push the Cap fully onto the header at the back, and check that no row of pins
+is left over at either end. Then turn it on again. Never add or remove a Cap while the
+device is on.
+
+The node writes what it did to `~/.meshterm/radio/spidev0.1/node.log`. That file names
+the wiring it used and the answer it got from the bus. Send it with a problem report.
 
 #### The Cap's GPS
 

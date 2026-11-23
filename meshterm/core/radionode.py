@@ -58,6 +58,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import dataclasses
+import errno
 import functools
 import json
 import logging
@@ -314,6 +315,16 @@ PI4IO_RETRY_S = 0.05
 #: because then the device is not ours to use.
 _I2C_SLAVE = 0x0703
 
+#: The errors of a read that mean that nothing is at the address: the kernel found no
+#: device there, or the device did not acknowledge. Each other error is a fault of the bus
+#: or of this process, and must never read as an absent board. ENXIO and EREMOTEIO are the
+#: two that a Linux I2C adapter gives for an address that nobody answers. EREMOTEIO is on
+#: Linux alone, and this file is imported on each platform, so its number stands in where
+#: the module does not have the name.
+_ABSENT_ERRNOS = frozenset(
+    {errno.ENXIO, errno.ENODEV, errno.ETIMEDOUT, getattr(errno, "EREMOTEIO", 121)}
+)
+
 #: The registers of the PI4IOE5V6408, and the manufacturer field of its ID register (bits
 #: 7–5). This field tells a different chip at the same address apart from it.
 _PI4IO_ID, _PI4IO_DIRECTION, _PI4IO_OUTPUT, _PI4IO_HIGH_Z = 0x01, 0x03, 0x05, 0x07
@@ -380,6 +391,10 @@ def _expander_id(fd: int, address: int, path: Path) -> int:
             os.write(fd, bytes([_PI4IO_ID]))
             return os.read(fd, 1)[0]
         except OSError as exc:
+            if exc.errno not in _ABSENT_ERRNOS:
+                raise NodeError(
+                    "failed", f"{address:#04x} on {path} could not be read: {exc}"
+                ) from exc
             if time.monotonic() >= deadline:
                 log.warning(
                     "no answer at %#04x on %s after %.1fs: %s", address, path, PI4IO_WAIT_S, exc
@@ -388,7 +403,14 @@ def _expander_id(fd: int, address: int, path: Path) -> int:
             time.sleep(PI4IO_RETRY_S)
 
 
-def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev")) -> None:
+def drive_pi4io(
+    bus: int,
+    address: int,
+    high: list[int],
+    dev: Path = Path("/dev"),
+    *,
+    required: bool = True,
+) -> bool:
     """Drive the ``high`` pins of a PI4IOE5V6408 high as outputs, and keep the rest as inputs.
 
     The function writes the output level before the direction. Thus a pin becomes an
@@ -396,6 +418,26 @@ def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev"
     register first. On a board where this is the expander of the radio itself, no answer
     there means that the radio is not attached. That is the one failure that the message
     must give in those words.
+
+    A board that has two revisions is the exception (``required=False``). There an absent
+    expander is the revision that has none, and the node continues without it. The node
+    then proves that a radio is on the bus (refer to :func:`confirm_sx126x`), because
+    "no expander" and "no board at all" are the same thing at this point.
+
+    Args:
+        bus: The I2C bus of the expander.
+        address: Its address.
+        high: The pins that go high.
+        dev: The directory of the device files, for the tests.
+        required: Whether an absent expander is a failure.
+
+    Returns:
+        Whether the expander answered.
+
+    Raises:
+        NodeError: ``no-i2c`` or ``permission`` for the bus, ``busy`` when a driver holds
+            the address, ``failed`` when the bus itself failed, and ``absent`` when nothing
+            answered and ``required`` is set.
     """
     path = dev / f"i2c-{bus}"
     _check_device(str(path), "no-i2c", "I2C bus")
@@ -408,7 +450,15 @@ def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev"
             fcntl.ioctl(fd, _I2C_SLAVE, address)
         except OSError as exc:
             raise NodeError("busy", f"{address:#04x} on {path} is held: {exc}") from None
-        ident = _expander_id(fd, address, path)
+        try:
+            ident = _expander_id(fd, address, path)
+        except NodeError as exc:
+            if exc.kind != "absent" or required:
+                raise
+            log.info(
+                "nothing at %#04x on %s: this board is the revision with no expander", address, path
+            )
+            return False
         if ident >> 5 != _PI4IO_MAKER:
             raise NodeError(
                 "absent", f"{address:#04x} on {path} is not a PI4IOE5V6408 (ID {ident:#04x})"
@@ -422,31 +472,81 @@ def drive_pi4io(bus: int, address: int, high: list[int], dev: Path = Path("/dev"
     finally:
         os.close(fd)
     log.info("PI4IO %#04x on %s: pins %s high", address, path, high)
+    return True
 
 
-def prepare_board(wiring: dict) -> list[tuple[Path, str]]:
+#: The register where an SX126x holds its version string, how many bytes of it to read,
+#: and the first bytes of what the string must be. A bus with no chip on it reads as all
+#: ones or all zeros, and neither starts with these letters.
+_VERSION_REGISTER, _VERSION_LENGTH, _SX126X = 0x0320, 16, b"SX126"
+
+
+def confirm_sx126x(lora: Any) -> None:
+    """Refuse a radio that did not answer with the version string of an SX126x.
+
+    This is for a board whose expander did not answer (refer to :func:`drive_pi4io`).
+    There, "this revision has no expander" and "no board is attached" look the same, and
+    only the chip can tell them apart. The library can start on a bus with nothing on it,
+    so the answer must come from the silicon.
+
+    Args:
+        lora: The chip of the started radio.
+
+    Raises:
+        NodeError: ``absent``, when the chip did not answer, or answered as something else.
+    """
+    try:
+        signature = bytes(lora.readRegister(_VERSION_REGISTER, _VERSION_LENGTH))
+    except Exception as exc:  # noqa: BLE001 - any failure here means that nothing answered
+        raise NodeError("absent", f"the radio did not answer a register read ({exc})") from None
+    if not signature.startswith(_SX126X):
+        log.warning("the version register reads %r, which is not an SX126x", signature)
+        raise NodeError("absent", "no SX126x answered on the SPI bus")
+    name = signature.split(bytes(1))[0].decode("ascii", "replace")
+    log.info("the chip reports itself as %s", name)
+
+
+@dataclasses.dataclass(frozen=True)
+class PreparedBoard:
+    """What :func:`prepare_board` switched on, and what it found there.
+
+    Attributes:
+        switches: The LED-class switches that it set, each with the value that it had
+            before. :func:`restore_leds` puts them back.
+        expander: ``True`` when the expander of the board answered, ``False`` when the
+            wiring permits an absent one and none answered, and ``None`` when this wiring
+            has no expander at all.
+    """
+
+    switches: list[tuple[Path, str]]
+    expander: bool | None
+
+
+def prepare_board(wiring: dict) -> PreparedBoard:
     """Switch on the parts that the chip must have before the radio library uses it.
 
     First the LED-class switches of the board (power, pin routing), then its RF expander.
     The node can get to the expander only after the header that it is on has power. The
-    function returns the previous states of the switches. The caller puts them back when
-    the node ends, also when the node did not start. Thus a failed start leaves the header
-    as it was.
+    function returns what it switched, and whether the expander answered. The caller puts
+    the switches back when the node ends, also when the node did not start. Thus a failed
+    start leaves the header as it was.
     """
     previous = set_leds(list(wiring.get("leds") or ()), root=LEDS)
     if previous:
         time.sleep(POWER_SETTLE_S)
+    expander: bool | None = None
     try:
         if int(wiring.get("pi4io_bus", -1)) >= 0:
-            drive_pi4io(
+            expander = drive_pi4io(
                 int(wiring["pi4io_bus"]),
                 int(wiring.get("pi4io_address", 0x43)),
                 list(wiring.get("pi4io_high") or ()),
+                required=bool(wiring.get("pi4io_required", True)),
             )
     except BaseException:
         restore_leds(previous)
         raise
-    return previous
+    return PreparedBoard(switches=previous, expander=expander)
 
 
 # --- the GPS beside the chip ---------------------------------------------------------------
@@ -739,13 +839,14 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
 
     # The switches of the board go back to how they were, in any way that the node ends,
     # also when the radio did not start. Thus a failed start leaves the header as it was.
-    switched = prepare_board(wiring)
+    board = prepare_board(wiring)
     try:
         return await _serve(
             state,
             wiring,
             seed,
             report,
+            expander=board.expander,
             model=str(config.get("model") or DEVICE_MODEL),
             models=models,
             sx1262=sx1262,
@@ -753,7 +854,7 @@ async def run_node(config: dict, report) -> int:  # noqa: ANN001 - (dict) -> Non
             identity_mod=identity_mod,
         )
     finally:
-        restore_leds(switched)
+        restore_leds(board.switches)
 
 
 async def _serve(  # noqa: PLR0913 - the library modules run_node imported, handed on
@@ -762,6 +863,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
     seed: dict,
     report,  # noqa: ANN001 - (dict) -> None
     *,
+    expander: bool | None,
     model: str,
     models: Any,
     sx1262: Any,
@@ -817,6 +919,11 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
         await asyncio.sleep(BEGIN_BACKOFF_S * (attempt + 1))
     logging.getLogger().removeHandler(recent)
     log.info("radio ready")
+
+    # The expander of this board did not answer, and the wiring permits that. Before the
+    # node accepts the board as the revision that has none, the chip itself must answer.
+    if expander is False:
+        confirm_sx126x(radio.lora)
 
     try:
         seed_bytes = load_identity_seed(

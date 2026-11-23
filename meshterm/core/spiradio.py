@@ -226,7 +226,11 @@ def gpio_chip(wiring: SpiWiring) -> int:
 #: The header of the Cap has no power until the ``ext_5v_out`` switch of the device tree is
 #: on. Two of its pins (reset, interrupt) get to the chip only while ``ext_usb_gpio_fun``
 #: routes them to GPIO, not to USB. Its PI4IOE5V6408 at 0x43 on I2C 1 turns on the RF path
-#: from pin P0. The Cardputer variant of Meshtastic drives that pin in the same way. DIO2
+#: from pin P0. The older Cap LoRa868 has the same radio on the same pins, and no expander
+#: at all, because it has no antenna switch to turn on. For this reason the expander of
+#: this board is not required: a Cap that does not answer at 0x43 is the older one, and the
+#: node proves that a radio is there before it accepts that.
+#: The Cardputer variant of Meshtastic drives that pin in the same way. DIO2
 #: switches the antenna and DIO3 supplies a 1.8 V TCXO, as on the AIO. Its GPS talks NMEA
 #: at 115200 on the UART of the header, which is the ``serial0`` of the Pi (``/dev/ttyS0``
 #: on the Zero). The GPS gets its power from ``ext_5v_out``, as the radio does. Thus it
@@ -241,6 +245,7 @@ CARDPUTER_ZERO_CAP = SpiWiring(
     pi4io_bus=1,
     pi4io_address=0x43,
     pi4io_high=(0,),
+    pi4io_required=False,
     gps_port="/dev/serial0",
     gps_baud=115200,
 )
@@ -819,6 +824,7 @@ async def start_node(wiring: SpiWiring, state: Path, *, node_name: str) -> NodeP
             "pi4io_bus": wiring.pi4io_bus,
             "pi4io_address": wiring.pi4io_address,
             "pi4io_high": list(wiring.pi4io_high),
+            "pi4io_required": wiring.pi4io_required,
             "use_dio2_rf": wiring.use_dio2_rf,
             "use_dio3_tcxo": wiring.use_dio3_tcxo,
             "is_waveshare": wiring.is_waveshare,

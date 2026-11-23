@@ -166,7 +166,7 @@ def test_a_failed_expander_puts_the_switches_back(
     monkeypatch.setattr(radionode, "LEDS", tmp_path)
     monkeypatch.setattr(radionode, "POWER_SETTLE_S", 0)
 
-    def absent(*_args: object) -> None:
+    def absent(*_args: object, **_kwargs: object) -> None:
         raise radionode.NodeError("absent", "nothing answers at 0x43 on /dev/i2c-1")
 
     monkeypatch.setattr(radionode, "drive_pi4io", absent)
@@ -175,6 +175,89 @@ def test_a_failed_expander_puts_the_switches_back(
         radionode.prepare_board(wiring)
     assert err.value.kind == "absent"
     assert power.read_text() == "0"
+
+
+def test_a_board_whose_expander_is_optional_starts_without_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Cap LoRa868 is the Cap LoRa-1262 with no antenna switch. It keeps the power on."""
+    power = _switch(tmp_path, "ext_5v_out", "0")
+    monkeypatch.setattr(radionode, "LEDS", tmp_path)
+    monkeypatch.setattr(radionode, "POWER_SETTLE_S", 0)
+    asked: dict[str, object] = {}
+
+    def nothing_there(*args: object, required: bool = True) -> bool:
+        asked["required"] = required
+        return False
+
+    monkeypatch.setattr(radionode, "drive_pi4io", nothing_there)
+    wiring = {
+        "leds": ["ext_5v_out=1"],
+        "pi4io_bus": 1,
+        "pi4io_high": [0],
+        "pi4io_required": False,
+    }
+    board = radionode.prepare_board(wiring)
+    assert asked["required"] is False, "the wiring decides, not the function"
+    assert board.expander is False, "the node knows that it is the board with no expander"
+    assert power.read_text() == "1", "the header keeps its power, because the radio is there"
+    radionode.restore_leds(board.switches)
+    assert power.read_text() == "0"
+
+
+def test_a_broken_bus_is_not_an_absent_board(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only "nobody answered" is an absent board. Each other error of the bus is a failure."""
+    real_write = os.write
+
+    def write(fd: int, data: bytes) -> int:
+        if fd != _BUS_FD:
+            return real_write(fd, data)
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(os, "write", write)
+    with pytest.raises(radionode.NodeError) as err:
+        radionode._expander_id(_BUS_FD, 0x43, Path("/dev/i2c-1"))
+    assert err.value.kind == "failed", "a broken bus must never read as a board that is not there"
+
+
+class _VersionChip:
+    """A started radio that answers a register read with ``answer``."""
+
+    def __init__(self, answer: bytes) -> None:
+        self.answer = answer
+
+    def readRegister(self, address: int, count: int) -> tuple[int, ...]:  # noqa: N802
+        """The spelling of the radio library. It returns the bytes at ``address``."""
+        assert (address, count) == (0x0320, 16)
+        return tuple(self.answer.ljust(count, bytes(1))[:count])
+
+
+def test_the_chip_says_that_it_is_an_sx126x() -> None:
+    """A board with no expander is accepted only after the chip answers with its own name."""
+    radionode.confirm_sx126x(_VersionChip(b"SX1262 V2D"))
+
+
+@pytest.mark.parametrize(
+    "answer", [bytes(16), bytes([0xFF] * 16), b"NOTARADIO"], ids=["zeros", "ones", "other"]
+)
+def test_a_bus_with_nothing_on_it_is_not_a_board(answer: bytes) -> None:
+    """An empty bus reads as all ones or all zeros. The library can start on it."""
+    with pytest.raises(radionode.NodeError) as err:
+        radionode.confirm_sx126x(_VersionChip(answer))
+    assert err.value.kind == "absent"
+
+
+def test_a_chip_that_cannot_be_read_is_not_a_board() -> None:
+    """A read that fails is the same answer as a read of nothing: no board is attached."""
+
+    class _Dead:
+        def readRegister(self, address: int, count: int) -> tuple[int, ...]:  # noqa: N802
+            """Fail as a chip that is not there fails."""
+            raise OSError(5, "Input/output error")
+
+    with pytest.raises(radionode.NodeError) as err:
+        radionode.confirm_sx126x(_Dead())
+    assert err.value.kind == "absent"
 
 
 def test_an_expander_on_a_missing_bus_is_named(tmp_path: Path) -> None:
@@ -239,7 +322,8 @@ def test_an_expander_that_never_answers_is_absent_and_the_log_says_why(
 
 def test_a_board_with_no_switches_prepares_nothing() -> None:
     """The wiring of the AIO has neither, and its node starts the same as it always did."""
-    assert radionode.prepare_board({"bus_id": 1, "pi4io_bus": -1}) == []
+    board = radionode.prepare_board({"bus_id": 1, "pi4io_bus": -1})
+    assert (board.switches, board.expander) == ([], None)
 
 
 def test_an_identity_is_minted_once_and_then_kept(tmp_path: Path) -> None:

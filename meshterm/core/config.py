@@ -114,6 +114,12 @@ class SpiWiring:
             ``0x44`` when it is high.
         pi4io_high: The pins of the expander (0–7) that MeshTerm drives high before it
             touches the chip. Each other pin stays an input.
+        pi4io_required: Whether the radio works only with that expander. ``True``, the
+            default, makes an expander that does not answer an absent board. Set it to
+            ``False`` on a board that has two revisions, one with the expander and one
+            without it. A board that does not answer at that address is then the revision
+            without it, and MeshTerm continues. The Cap LoRa868 of the Cardputer Zero is
+            that revision of the Cap LoRa-1262.
         use_dio2_rf: Whether DIO2 drives the RF switch.
         use_dio3_tcxo: Whether DIO3 powers a TCXO.
         is_waveshare: The wiring quirks of the Waveshare HAT, which the radio library
@@ -144,6 +150,7 @@ class SpiWiring:
     pi4io_bus: int = -1
     pi4io_address: int = 0x43
     pi4io_high: tuple[int, ...] = ()
+    pi4io_required: bool = True
     use_dio2_rf: bool = True
     use_dio3_tcxo: bool = True
     is_waveshare: bool = False
