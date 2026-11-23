@@ -475,6 +475,12 @@ def drive_pi4io(
     return True
 
 
+#: What the user reads when no radio answered on the bus, however the node found out. The
+#: three ways (the chip did not start, it did not answer a register read, it answered as
+#: something else) are one thing to the user, and :func:`explain` adds the question about
+#: the attachment. The log keeps which of the three it was.
+NO_RADIO = "no radio answered on the SPI bus"
+
 #: The register where an SX126x holds its version string, how many bytes of it to read,
 #: and the first bytes of what the string must be. A bus with no chip on it reads as all
 #: ones or all zeros, and neither starts with these letters.
@@ -498,12 +504,37 @@ def confirm_sx126x(lora: Any) -> None:
     try:
         signature = bytes(lora.readRegister(_VERSION_REGISTER, _VERSION_LENGTH))
     except Exception as exc:  # noqa: BLE001 - any failure here means that nothing answered
-        raise NodeError("absent", f"the radio did not answer a register read ({exc})") from None
+        log.warning("the version register could not be read: %s", exc)
+        raise NodeError("absent", NO_RADIO) from None
     if not signature.startswith(_SX126X):
         log.warning("the version register reads %r, which is not an SX126x", signature)
-        raise NodeError("absent", "no SX126x answered on the SPI bus")
+        raise NodeError("absent", NO_RADIO)
     name = signature.split(bytes(1))[0].decode("ascii", "replace")
     log.info("the chip reports itself as %s", name)
+
+
+def begin_failure(kind: str, detail: str, expander: bool | None) -> NodeError:
+    """The error that a failed ``radio.begin()`` gives the user.
+
+    Usually this is the kind that the log lines of the library give, in the words of the
+    library (refer to :func:`classify_begin_failure`). A board whose expander did not
+    answer is the exception. Nothing has answered anywhere on that board, so the first
+    answer the user needs is that no radio is there. The words of the library stay in the
+    log. A busy line keeps its own kind, because a line that another program holds is a
+    cause of its own and has its own correction.
+
+    Args:
+        kind: What :func:`classify_begin_failure` made of the lines of the library.
+        detail: The last line of the library.
+        expander: What :func:`prepare_board` found (``False`` for an absent one).
+
+    Returns:
+        The error to raise.
+    """
+    if expander is False and kind == "failed":
+        log.warning("the radio did not start: %s", detail)
+        return NodeError("absent", NO_RADIO)
+    return NodeError(kind, detail)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -915,7 +946,7 @@ async def _serve(  # noqa: PLR0913 - the library modules run_node imported, hand
             pass
         if kind != "busy" or attempt == BEGIN_ATTEMPTS - 1:
             detail = recent.lines[-1] if recent.lines else "radio.begin() failed"
-            raise NodeError(kind, detail)
+            raise begin_failure(kind, detail, expander)
         await asyncio.sleep(BEGIN_BACKOFF_S * (attempt + 1))
     logging.getLogger().removeHandler(recent)
     log.info("radio ready")

@@ -259,7 +259,7 @@ requires the switch chip. MeshTerm's own wiring for the Cap does not require it.
 `pi4io_required = false` in your profile, or remove the `pi4io_bus` line from it (refer
 to [Board wiring](uconsole.md#board-wiring)).
 
-**"No SX126x answered on the SPI bus"** means that no radio answered. Turn the Cardputer
+**"No radio answered on the SPI bus"** means what it says. Turn the Cardputer
 Zero off, push the Cap fully onto the header at the back, and check that no row of pins
 is left over at either end. Then turn it on again. Never add or remove a Cap while the
 device is on.

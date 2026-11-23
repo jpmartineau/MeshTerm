@@ -247,6 +247,26 @@ def test_a_bus_with_nothing_on_it_is_not_a_board(answer: bytes) -> None:
     assert err.value.kind == "absent"
 
 
+@pytest.mark.parametrize(
+    ("expander", "kind", "expected"),
+    [
+        (False, "failed", "absent"),
+        (False, "busy", "busy"),
+        (True, "failed", "failed"),
+        (None, "failed", "failed"),
+    ],
+    ids=["no-expander", "busy-line", "with-expander", "no-expander-in-wiring"],
+)
+def test_a_radio_that_does_not_start_says_the_useful_thing(
+    expander: bool | None, kind: str, expected: str
+) -> None:
+    """On a board where nothing answered at all, the user must read that nothing is there."""
+    error = radionode.begin_failure(kind, "Something went wrong, check your wiring!", expander)
+    assert error.kind == expected
+    if expected == "absent":
+        assert str(error) == radionode.NO_RADIO, "one sentence for a radio that is not there"
+
+
 def test_a_chip_that_cannot_be_read_is_not_a_board() -> None:
     """A read that fails is the same answer as a read of nothing: no board is attached."""
 
