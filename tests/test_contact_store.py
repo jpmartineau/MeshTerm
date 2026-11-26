@@ -294,14 +294,14 @@ def test_restoring_clears_the_mark_and_the_contact_merges_again(tmp_path) -> Non
     store.archive(PUB_A, alice, when=1_700_000_000)
     assert merge_contacts(store, PUB_A, []) == []
 
-    was = store.restore(PUB_A, "aa" * 32)
+    was = store.unarchive(PUB_A, "aa" * 32)
     assert was is not None and was.name == "Alice"
     assert store.archived(PUB_A) == []
     assert [c.name for c in merge_contacts(store, PUB_A, [])] == ["Alice"]
 
     # A restore of a contact that is not archived does nothing. It is not an error.
-    assert store.restore(PUB_A, "aa" * 32) is None
-    assert store.restore(PUB_A, "ff" * 32) is None
+    assert store.unarchive(PUB_A, "aa" * 32) is None
+    assert store.unarchive(PUB_A, "ff" * 32) is None
 
 
 def test_archiving_a_contact_the_store_never_saw_still_remembers_it(tmp_path) -> None:  # noqa: ANN001

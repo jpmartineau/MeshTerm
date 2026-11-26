@@ -52,7 +52,7 @@ from .chat import (
     _belongs,
     _contact_names,
     _make_paths_presenter,
-    _with_restore,
+    _with_contact_add,
     our_node,
 )
 
@@ -420,10 +420,10 @@ async def open_room(ctx: AppContext, conversation: Conversation) -> int:
     stored_names, named_at = ctx.repo.node_names_with_times()
 
     async def send(text: str) -> ChatMessage | None:
-        return await _with_restore(ctx, lambda: ctx.chat.send_post(room, text))
+        return await _with_contact_add(ctx, lambda: ctx.chat.send_post(room, text))
 
     async def resend(message: ChatMessage) -> ChatMessage:
-        return await _with_restore(ctx, lambda: ctx.chat.resend_post(room, message))
+        return await _with_contact_add(ctx, lambda: ctx.chat.resend_post(room, message))
 
     async def fresh() -> Contact:
         """The room as the contact cache holds it now. Its route and heard time change."""

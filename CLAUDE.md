@@ -76,6 +76,7 @@ them instead of hand-rolling:
 | node | any device on the mesh — a radio broadcasting packets; roles: companion, repeater, room server, sensor. The umbrella term |
 | managed node | a node whose admin password MeshTerm stores (`admin_store`) — the user can log in to it without a prompt. Marked `🔑` (`marks.MANAGED_ICON`, `*` on the PicoCalc) beside the type mark in the Contacts list, the admin picker, and the node page header; the first list on the Clock drift page, under its histogram. The menu section of the admin tools is **Managed nodes** (JP, 2026-11-03; it was "Other nodes") |
 | contact | a node your device knows: **discovered** (heard broadcasting, not yet added) or **added** (in the contact list, messageable). Every contact is a node; not every node is a contact |
+| archived | a contact a sweep took off the *device*, kept here in full with its key, history and transcripts (`contact_store`, the Archived contacts list). The radio cannot address it, so a chat marks its sender chip `💾` (`marks.ARCHIVED_ICON`, `⌂` on the PicoCalc) where a live contact wears its padlock — the two can never meet, since a lock exists to keep a contact *out* of the archive. The reverse move is **unarchive** (JP, 2026-11-25), never "restore": that word is MeshTerm's for settings, channels, device routes and the map viewport, and a word that names five things names none |
 | heard | received from ("last heard", "first heard") — never "seen" in UX text |
 | key | the full fixed-length value — a node's public key, a channel secret |
 | hash | the short derived id — a key's first path-hash-mode bytes (the slice `highlighted_hash` lights), a channel hash, a path hop |
@@ -312,7 +313,10 @@ deliberately, one at a time, and say why in the code.
   `session._CTRL_LETTER_CHORDS`, each letter the mnemonic of its action where it can be
   (`^P` paths, `^U` URL, `^L` locate, `^O` open the author's page, `^K` toggle the lock of
   the author or of the Contacts list's highlighted contact, `Lock` on Shift+F2 in both —
-  JP, 2026-10-19; `^G` logs in to a room,
+  JP, 2026-10-19 — and on an **archived** author, where there is no lock to turn, that
+  same `^K` unarchives the contact instead (`Unarch` on the chip, `^K unarchive` in the
+  hint; JP, 2026-11-25): two verbs on one key is honest only because the two states are
+  mutually exclusive by construction, so the key is never ambiguous; `^G` logs in to a room,
   JP's pick, 2026-10-11). One verb per letter across screens is the preference, not the
   rule (JP, 2026-10-10): a screen that has no use for a letter's verb may give the
   letter a verb of its own, so long as nothing between the keyboard and the app takes it —
@@ -570,7 +574,7 @@ as a grouped list does. Filling a page in is editing its `.md`; no Python follow
   text underneath is unchanged (`@[Name]` is what is sent and counted). Enter on a picked
   message inserts its mention **at the cursor**, so one message can name several nodes.
   The `›` wears `cursor` white and the typed text the `compose` white (JP, 2026-10-13).
-- Concept icons: 📡 advert · 🕒 clock/sync · 🔄 reboot · 💾 backup · 📂 restore ·
+- Concept icons: 📡 advert · 🕒 clock/sync · 🔄 reboot · 💾 backup/archive (the sweep row, `Archive contact`, and an archived contact's chip) · 📂 restore/unarchive ·
   🔑 channel/credential key · 🔐 identity/auth secret ·
   🔒 lock (a locked contact, a private channel) · 🔓 unlock · 🗑 clear/delete · ✎ compose/edit ·
   ⚙ parameter · `#` count · ▶ run · ⚡ explore/probe · ★ best/winner · ⭐ watch ·
@@ -912,8 +916,9 @@ branch on the platform per frame, and never `from meshterm.platforms import PLAT
   `Unlock` on a locked author) is the one exception, by JP's choice (2026-10-19): it sits on
   Shift+F2 where that is free (channel, DM), and in a room, where `Log in` holds it, the
   `Author` page carries it — a conversation opens that page with its lock row and no other
-  management verb. Its hint atom goes in only where the hint has room without dropping
-  another atom.
+  management verb. On an archived author that same chip reads `Unarch`, the six cells its
+  key has (`Unarchive` does not fit a chip, and the hint says the whole word). Its hint
+  atom goes in only where the hint has room without dropping another atom.
 - **Each handheld deals its own lane.** Everything about the lane that belongs to one
   keyboard is a `LaneDeck` (`fkeys.PICOCALC_LYRA_DECK`, `fkeys.CARDPUTER_ZERO_DECK`), named by
   `Platform.lane_deck`: which keycodes drive the slots, where the chips sit on the row, how

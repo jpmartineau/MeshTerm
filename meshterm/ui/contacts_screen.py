@@ -348,8 +348,8 @@ async def open_contacts(
     selects, the archive flow, and the archived list (the tail actions open the last two)
     nest *above* it. Esc from there is one pop back onto the row from which the user opened
     the page, with the same sort, the same filter, and the same scroll. Some actions change
-    which contacts the device holds: a sweep here, a single archive, restore, or delete on
-    a detail page, or a restore from inside the archived list. These actions end the visit.
+    which contacts the device holds: a sweep here, a single archive, unarchive, or delete on
+    a detail page, or an unarchive from inside the archived list. These actions end the visit.
     Then MeshTerm reads the device again and starts a new visit. This new screen is the
     deliberate exception to keeping the screen: the rows that the screen held a place in do
     not exist now.
@@ -433,7 +433,7 @@ async def open_contacts(
                 if chosen == _ARCHIVED:
                     # The archived list is a screen and not a section. It nests above this
                     # screen, and Esc comes back to this row. It makes this screen again
-                    # only if the user restored or deleted a contact in it, because then
+                    # only if the user unarchived or deleted a contact in it, because then
                     # this list is stale.
                     if await open_archived(ctx, self_key, prefix_bytes):
                         rebuild = True
@@ -441,7 +441,7 @@ async def open_contacts(
                     continue
                 # The sentinel of our node opens the page of our node. Each other value is a
                 # Contact. The page nests above this list and has the verbs that manage one
-                # contact: archive, restore, and delete. When one of them runs, the page
+                # contact: archive, unarchive, and delete. When one of them runs, the page
                 # says so when it closes, and this list is built again without the row. This
                 # is the same new read that the sweep does, for one contact at a time.
                 if await open_node_detail(ctx, None if chosen == YOU else chosen):

@@ -69,6 +69,16 @@ LOCK_ICON = "🔒"
 #: PicoCalc. A node that is not managed draws nothing, for the same reason as the padlock.
 MANAGED_ICON = "🔑"
 
+#: The mark of an **archived contact**: a contact that a sweep took off the device, and that
+#: MeshTerm keeps here in full (JP, 2026-11-25). It is the ``💾`` that the archive already
+#: has on the sweep row and on the node page, because the state and the move that makes it
+#: are one concept. A chat puts it before the name on the sender chip, in the place of the
+#: padlock of a locked contact. The two can never meet there: only a live contact can have a
+#: lock (refer to :meth:`~meshterm.ui.node_detail_screen.ContactPages.lock_state`). It goes
+#: through :func:`~meshterm.ui.theme.glyph`, which gives the ``⌂`` of "put it in a safe
+#: place" on the PicoCalc. A live contact draws nothing, as for the padlock.
+ARCHIVED_ICON = "💾"
+
 #: Sentinels that name the endpoints of a path on the route graph. ``\x00`` never occurs
 #: in a node hash, so the sentinels can share the namespace of node ids and not collide
 #: with an id.

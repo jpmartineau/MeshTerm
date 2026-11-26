@@ -20,7 +20,7 @@ the top.
 **It has no actions.** It is not a select list with the verbs removed. It is a list with
 nothing to select, and Esc leaves it. Each action that you can do to an archived contact
 belongs to that one contact. The actions are on its Node detail page, which Enter opens:
-restore it to the device, or delete it for good. A restore verb on this screen also would
+unarchive it, or delete it for good. An unarchive verb on this screen also would
 be a second route to the same write. The page is the place where the user can see which
 node the action is for.
 """
@@ -116,7 +116,7 @@ class ArchivedScreen(ContactListScreen):
             rows=rows,
             prefix_bytes=prefix_bytes,
             sort=sort,
-            prompt=("Off the device, kept here with their history. Open one to restore it."),
+            prompt=("Off the device, kept here with their history. Open one to unarchive it."),
             footer_hint=_HINT,
             lanes=ARCHIVED_LANES,
             pan=True,
@@ -131,7 +131,7 @@ async def open_archived(ctx: AppContext, self_key: str, prefix_bytes: int) -> bo
 
     The list stays pushed for the whole visit. Thus a detail page nests above it, and Esc
     from the page lands back on the row from which the user opened it, with the same sort,
-    the same filter, and the same scroll. A page can *restore* or *delete* the contact that
+    the same filter, and the same scroll. A page can *unarchive* or *delete* the contact that
     it shows. Then the visit ends and MeshTerm builds the list again without the row. This
     is the same deliberate exception that the Contacts list makes: the row in which the
     screen held a place does not exist now.
@@ -143,7 +143,7 @@ async def open_archived(ctx: AppContext, self_key: str, prefix_bytes: int) -> bo
         prefix_bytes: The path hash width in bytes to highlight in each key.
 
     Returns:
-        ``True`` if the user restored or deleted any contact, so that the contact list of
+        ``True`` if the user unarchived or deleted any contact, so that the contact list of
         the caller knows that it must read again.
     """
     from .node_detail_screen import open_node_detail
@@ -158,7 +158,7 @@ async def open_archived(ctx: AppContext, self_key: str, prefix_bytes: int) -> bo
     while True:
         rows = archived_rows(store.archived(dev_pub) if store and dev_pub else [])
         if not rows:
-            # The user restored or deleted each contact while in here. No list is left to
+            # The user unarchived or deleted each contact while in here. No list is left to
             # show. An empty screen that the user must leave with Esc says less than the
             # note that MeshTerm shows when the user goes back.
             ctx.ui.note("[muted]no archived contacts[/muted]")
@@ -170,7 +170,7 @@ async def open_archived(ctx: AppContext, self_key: str, prefix_bytes: int) -> bo
                 chosen = await visit.result()
                 if chosen is CANCEL or chosen is None:  # Esc
                     return changed
-                # The page manages the contact that it shows (restore it, or delete it for
+                # The page manages the contact that it shows (unarchive it, or delete it for
                 # good). It says so when it closes, and then this list is stale.
                 if await open_node_detail(ctx, chosen):
                     changed = rebuild = True

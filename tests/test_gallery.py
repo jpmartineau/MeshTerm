@@ -566,6 +566,7 @@ def _chat(cols: int, rows: int) -> Screen:
     store = SimpleNamespace(
         is_locked=lambda dev, key: True,
         locked_keys=lambda dev: frozenset({alice.public_key}),
+        archived_keys=lambda dev: frozenset(),
         archived=lambda dev: [],
     )
     messages = [

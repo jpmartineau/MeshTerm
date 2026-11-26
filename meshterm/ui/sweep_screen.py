@@ -35,7 +35,7 @@ flow gets that free space back, in three steps over the pushed Contacts list:
 3. **Confirm.** An amber Cancel/Archive dialog, not the red typed gate of a deletion,
    because this operation is reversible. Each contact keeps its key, its reception history,
    and its transcripts. The Archived list is one row away on the Contacts screen, and a
-   restore is one write. We keep the red for what cannot be undone. That is why the red
+   unarchive is one write. We keep the red for what cannot be undone. That is why the red
    continues to have a meaning.
 
 **The preview shows the evidence, never the verdict.** It does not show the score. A
@@ -58,7 +58,7 @@ row, so they stay as they are. The store keeps the full public key, so one write
 contact back. The chat screen already offers this write when the device rejects a send
 because it does not hold the recipient
 (:class:`~meshterm.core.connection.ContactNotOnDeviceError`). Thus, if you send a message
-to an archived contact, MeshTerm restores the contact as part of the send, and the send
+to an archived contact, MeshTerm puts the contact back as part of the send, and the send
 does not fail.
 """
 
@@ -836,7 +836,7 @@ async def _sweep(
 
     The confirm is **amber, and the user types nothing**. A bulk deletion has a red typed
     gate. The two tiers are for two different costs, and this cost can be recovered: each
-    contact keeps its key, its reception history, and its transcripts, and a restore is one
+    contact keeps its key, its reception history, and its transcripts, and an unarchive is one
     write from the Archived list. A red typed confirm here would use the strongest warning of
     the app on its most reversible bulk action. Then a warning has no meaning.
 
@@ -862,7 +862,7 @@ async def _sweep(
             f"Archive {_count_desc(len(victims))}? They come off this device's contact list, "
             "freeing space for new ones. MeshTerm keeps them — with their keys, reception "
             "history, and messages — under Archived contacts, and any of them can be "
-            f"restored.{also}",
+            f"unarchived.{also}",
             [("Cancel", False), ("Archive", True)],
             title="Archive contacts",
             default=1,

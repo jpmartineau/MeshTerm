@@ -476,6 +476,7 @@ async def test_archive_sweeps_under_a_progress_bar_and_reports_in_a_dialog() -> 
         repo=_Repo(),
         contact_store=SimpleNamespace(
             locked_keys=lambda *a: frozenset(),
+            archived_keys=lambda *a: frozenset(),
             is_locked=lambda *a: False,
             archive=lambda dev, contact, when: archived.append(contact.name),
         ),
@@ -521,7 +522,7 @@ async def test_archive_sweeps_under_a_progress_bar_and_reports_in_a_dialog() -> 
     assert asked and asked[0]["danger"] is True
     assert "destructive" not in asked[0]
     assert [label for label, _v in asked[0]["buttons"]] == ["Cancel", "Archive"]
-    assert "restored" in asked[0]["prompt"]
+    assert "unarchived" in asked[0]["prompt"]
 
     # The sweep runs under the progress dialog, which is the top screen for its whole
     # lifetime. Thus the user cannot move in the list under it while the sweep works.
@@ -1093,7 +1094,7 @@ async def test_deleting_one_contact_drops_it_from_the_device_and_the_store() -> 
     assert [label for label, _v in asked[0]["buttons"]] == ["Cancel", "Delete"]
     assert asked[0]["default"] == 1
     prompt = asked[0]["prompt"]
-    assert "Hub" in prompt and "for good" in prompt and "restored" in prompt
+    assert "Hub" in prompt and "for good" in prompt and "unarchived" in prompt
     assert "archive it instead" in prompt
     # Both parts of the union, then the cache that the list reads again.
     assert removed == ["Hub"]
@@ -1503,7 +1504,7 @@ async def test_archiving_one_contact_takes_it_off_the_device_and_keeps_it() -> N
     assert [label for label, _v in asked[0]["buttons"]] == ["Cancel", "Archive"]
     assert asked[0]["default"] == 1
     prompt = asked[0]["prompt"]
-    assert "restore it at any time" in prompt
+    assert "unarchive it at any time" in prompt
     # The contact has the name that the Contacts list gives it: its type mark is to the left
     # of the name, and each has its own colour. The sentence around them keeps the amber.
     assert prompt.plain.startswith("Archive ▲ Hub? ")
@@ -1513,7 +1514,7 @@ async def test_archiving_one_contact_takes_it_off_the_device_and_keeps_it() -> N
 
     assert styles_at(prompt.plain.index("▲")) == ["type.repeater"]
     assert styles_at(prompt.plain.index("Hub")) == [name_style("Hub", "3d" * 32)]
-    assert styles_at(0) == styles_at(prompt.plain.index("restore")) == ["warn"]
+    assert styles_at(0) == styles_at(prompt.plain.index("unarchive")) == ["warn"]
     assert not prompt.style, "a base style would merge the amber's bold into the mark"
     # The contact is off the radio and kept here. MeshTerm removes the cached contact list,
     # so the list reads again.
@@ -1532,7 +1533,7 @@ async def test_restoring_writes_the_contact_back_before_clearing_the_mark() -> N
 
     from meshterm.core.connection import DeviceCommandError
     from meshterm.core.models import Contact
-    from meshterm.ui.node_detail_screen import _restore_archived
+    from meshterm.ui.node_detail_screen import _unarchive_contact
     from meshterm.ui.surface import TuiUi
     from meshterm.ui.tui.session import TuiSession
 
@@ -1550,7 +1551,7 @@ async def test_restoring_writes_the_contact_back_before_clearing_the_mark() -> N
         contact_store=SimpleNamespace(
             locked_keys=lambda *a: frozenset(),
             is_locked=lambda *a: False,
-            restore=lambda dev, key: restored.append(key),
+            unarchive=lambda dev, key: restored.append(key),
         ),
         devstate=SimpleNamespace(invalidate_contacts=lambda: None),
         device=lambda: _device(_Refuses()),
@@ -1558,8 +1559,8 @@ async def test_restoring_writes_the_contact_back_before_clearing_the_mark() -> N
 
     import asyncio
 
-    task = asyncio.ensure_future(_restore_archived(ctx, hub, "cc" * 32, "Hub"))
-    shown = await _step_until_screen(session, lambda s: "couldn't restore" in _screen_text(s))
+    task = asyncio.ensure_future(_unarchive_contact(ctx, hub, "cc" * 32, "Hub"))
+    shown = await _step_until_screen(session, lambda s: "couldn't unarchive" in _screen_text(s))
     shown.handle("escape")
     assert await task is False
     assert restored == [], "the archive mark survives a write the device refused"

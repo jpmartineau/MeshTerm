@@ -160,7 +160,9 @@ class ChatScreen(Screen):
     selected, there is nothing to show. ^U shows the links of the selected message as QR
     codes, on the share screen. ^L opens the map on the node of the author of the selected
     message, when that node has a location. ^K locks that author against the archive
-    sweep, or unlocks it. When no message is selected, Esc leaves the chat.
+    sweep, or unlocks it. On an author that a sweep already archived, where there is no
+    lock to turn, ^K unarchives the contact instead: it goes back on the device, and its
+    chip loses the ``💾`` of the archive. When no message is selected, Esc leaves the chat.
 
     A channel with a send scope shows its region in the title (``#ops · yul``). There, ^R
     sends a message again *unscoped*: the selected message, or the newest when no message is
@@ -247,7 +249,12 @@ class ChatScreen(Screen):
             opp_enabled=self._retry_target() is not None,
         )
         lock = self._lock_target()
-        if self._pages is not None and self._pages.can_lock:
+        # ^K has two verbs, and the chip names the one that the selected author gets. An
+        # archived contact can have no lock, so there the key puts it back on the device.
+        unarchive = self._unarchive_target()
+        if unarchive is not None:
+            toggle = ("Unarch", "lock")
+        elif self._pages is not None and self._pages.can_lock:
             toggle = ("Unlock" if lock is not None and lock[1] else "Lock", "lock")
         else:
             toggle = ("", "")
@@ -256,7 +263,7 @@ class ChatScreen(Screen):
             "url_code",
             *toggle,
             enabled=self._picked_picture() is not None or bool(self._picked_urls()),
-            opp_enabled=lock is not None,
+            opp_enabled=lock is not None or unarchive is not None,
         )
         if self._locator is not None or self._pages is not None:
             where = ("Map", "locate") if self._locator is not None else ("", "")
@@ -441,7 +448,9 @@ class ChatScreen(Screen):
         The F-key lane uses the same rules to dim its slots.
 
         ``^K lock`` (or ``^K unlock``) must have a selected message whose author can have a
-        lock (refer to :meth:`_lock_target`). It goes in only when there is room for it
+        lock (refer to :meth:`_lock_target`). An archived author has no lock, and there the
+        atom is ``^K unarchive`` (refer to :meth:`_unarchive_target`). It goes in only when
+        there is room for it
         (JP, 2026-10-19: "If there's room, put it."): the hint with it must stay in 72 cells
         and keep each atom of the hint without it. It can make the words of an atom shorter
         (:data:`_SHORT_ATOMS`), as ^U, ^L, and ^O already do. When it does not go in, the
@@ -449,8 +458,12 @@ class ChatScreen(Screen):
         """
         hint = self._hint_with("")
         lock = self._lock_target()
-        if lock is not None:
+        atom = ""
+        if self._unarchive_target() is not None:
+            atom = "^K unarchive"
+        elif lock is not None:
             atom = "^K unlock" if lock[1] else "^K lock"
+        if atom:
             longer = self._hint_with(atom)
             if (
                 cell_len(longer) <= _HINT_CELLS
@@ -686,8 +699,10 @@ class ChatScreen(Screen):
 
         A change of the locks draws all of the transcript again, because the sender chip of
         a locked contact has a padlock (refer to :meth:`_group_header`). The locks change
-        rarely: ^K here, or the lock row of the node page of an author. A change of the
-        clock tolerance does the same, because it decides which times are corrected.
+        rarely: ^K here, or the lock row of the node page of an author. The **archived**
+        contacts are the same case, because their chips carry the ``💾`` of the archive, and
+        ^K here changes that set too. A change of the clock tolerance does the same, because
+        it decides which times are corrected.
 
         Most importantly, this works for each message. It is not a cached prefix that
         stops at the first such row. Thus a message stays cheap to draw again, however far
@@ -701,6 +716,7 @@ class ChatScreen(Screen):
         cache = self._render_cache
         spacing = self.section_spacing()
         locks = self._pages.locked_keys() if self._pages is not None else frozenset()
+        archived = self._pages.archived_keys() if self._pages is not None else frozenset()
         tolerance = clock_tolerance_s()
         self._tolerance_s = tolerance
         images = bool(preferences.current().show_mcoimg)
@@ -711,6 +727,7 @@ class ChatScreen(Screen):
             and cache["width"] == width
             and cache["spacing"] == spacing
             and cache["locks"] == locks
+            and cache["archived"] == archived
             and cache["tolerance"] == tolerance
         ):
             cached_ids = cache["ids"]
@@ -820,6 +837,7 @@ class ChatScreen(Screen):
             "width": width,
             "spacing": spacing,
             "locks": locks,
+            "archived": archived,
             "tolerance": tolerance,
             "images": images,
             "ids": ids,
@@ -899,7 +917,8 @@ class ChatScreen(Screen):
         key = None if sender == "·" else self._header_key(sender, message)
         pages = self._pages
         locked = key is not None and pages is not None and pages.lock_state(pages.find(key)) is True
-        return author_chip(sender, key, locked=locked, picked=picked)
+        archived = key is not None and pages is not None and pages.is_archived(key)
+        return author_chip(sender, key, locked=locked, archived=archived, picked=picked)
 
     def _header_key(self, sender: str, message: ChatMessage) -> str | None:
         """The key that gives the colour of the sender chip of a group: the key of the name.
@@ -1303,7 +1322,7 @@ class ChatScreen(Screen):
         elif action == "author_page":
             self._open_author_page()
         elif action == "lock":
-            self._toggle_lock()
+            self._press_lock_key()
         elif action == "retry":
             if self._is_channel:
                 self._begin_resend_unscoped()
@@ -1419,15 +1438,14 @@ class ChatScreen(Screen):
         contact = self._author_contact()
         return None if contact is None else (lambda: pages.show(contact))
 
-    def _author_contact(self) -> Contact | None:
-        """The contact that wrote the selected message, or ``None``.
+    def _author_key(self) -> str | None:
+        """The key of the author of the selected message, or ``None``.
 
-        The key of the author finds it (refer to :meth:`_header_key`, the same key that
-        gives the colour of the sender chip). A message of ours, a message with no sender,
-        and an author that is not a contact have none.
+        It is the key that gives the colour of the sender chip (refer to
+        :meth:`_header_key`). A message of ours and a message with no sender have none, so
+        each ^ key that acts on an author is off for them.
         """
-        pages = self._pages
-        if pages is None or self._selected is None or not self._messages:
+        if self._selected is None or not self._messages:
             return None
         message = self._messages[max(0, min(self._selected, len(self._messages) - 1))]
         if message.outbound:
@@ -1435,7 +1453,24 @@ class ChatScreen(Screen):
         sender, _body = self._sender_and_body(message)
         if sender == "·":
             return None
-        return pages.find(self._header_key(sender, message))
+        return self._header_key(sender, message)
+
+    def _author_contact(self) -> Contact | None:
+        """The contact that wrote the selected message, or ``None``.
+
+        The key of the author finds it (refer to :meth:`_author_key`). A message of ours, a
+        message with no sender, and an author that MeshTerm has no contact for have none.
+
+        An **archived** contact counts. The radio cannot address it, but MeshTerm keeps the
+        whole record, so the node page has as much to show as for a live contact (refer to
+        :meth:`~meshterm.ui.node_detail_screen.ContactPages.archived_author`). Thus ^O opens
+        the page of an archived author, and ^K unarchives it instead of locking it.
+        """
+        pages = self._pages
+        key = self._author_key()
+        if pages is None or key is None:
+            return None
+        return pages.find(key) or pages.archived_author(key)
 
     def _lock_target(self) -> tuple[Contact, bool] | None:
         """The author that ^K locks or unlocks, and whether it is locked now.
@@ -1450,6 +1485,33 @@ class ChatScreen(Screen):
             return None
         locked = self._pages.lock_state(contact)
         return None if locked is None else (contact, locked)
+
+    def _unarchive_target(self) -> Contact | None:
+        """The archived author that ^K writes back to the device, or ``None``.
+
+        An archived contact can have no lock, so ^K has nothing to toggle on one and
+        unarchives it instead (JP, 2026-11-25). The two verbs of the key can never both
+        apply: :meth:`_lock_target` is ``None`` for exactly the authors that this method
+        answers for (refer to
+        :meth:`~meshterm.ui.node_detail_screen.ContactPages.lock_state`). The hint and the
+        F-key lane ask both at each paint, and name the one that acts.
+        """
+        pages = self._pages
+        key = self._author_key()
+        if pages is None or key is None:
+            return None
+        return pages.archived_author(key)
+
+    def _press_lock_key(self) -> None:
+        """Do what ^K does to the author of the selected message: unarchive it, or lock it.
+
+        An archived author has no lock to turn, so the key puts the contact back on the
+        device. Each other author gets the lock toggled.
+        """
+        if self._unarchive_target() is not None:
+            self._unarchive_author()
+        else:
+            self._toggle_lock()
 
     def _toggle_lock(self) -> None:
         """Lock the author of the selected message, or unlock it when it is locked (^K).
@@ -1466,6 +1528,35 @@ class ChatScreen(Screen):
         name = contact.name or contact.key_prefix
         self._status = f"Unlocked {name}" if locked else f"Locked {name} — no sweep archives it"
         self._session.invalidate()
+
+    def _unarchive_author(self) -> None:
+        """Write the archived author of the selected message back to the device (^K).
+
+        There is no confirm, for the reason the node page gives: the write is constructive,
+        and a sweep reverses it (refer to
+        :func:`~meshterm.ui.node_detail_screen._unarchive_contact`). It needs the device, so
+        it runs as a detached flow, as ^O does. A refused write (most often a full contact
+        table) reports itself in a dialog, and the chip keeps its ``💾``.
+
+        After the write, the chip of the author loses the ``💾`` and the author can be
+        locked, because the pages hold the contact as live now.
+        """
+        contact = self._unarchive_target()
+        pages = self._pages
+        if contact is None or pages is None or self._page_open:
+            return
+        self._page_open = True  # one device flow at a time, as for the node page
+        name = contact.name or contact.key_prefix
+
+        async def run() -> None:
+            try:
+                if await pages.unarchive(contact):
+                    self._status = f"Unarchived {name} — it's back on this device"
+            finally:
+                self._page_open = False
+                self._session.invalidate()
+
+        self._session.run_detached(run())
 
     def _open_author_page(self) -> None:
         """Open the node page of the author of the selected message (^O). One page at a time.
@@ -2098,7 +2189,9 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
                 conversation.channel_idx, text, label=conversation.label
             )
         assert conversation.contact is not None
-        return await _with_restore(ctx, lambda: ctx.chat.send_direct(conversation.contact, text))
+        return await _with_contact_add(
+            ctx, lambda: ctx.chat.send_direct(conversation.contact, text)
+        )
 
     resend: Callable[[ChatMessage], Awaitable[ChatMessage]] | None = None
     resend_unscoped: Callable[[ChatMessage], Awaitable[ChatMessage | None]] | None = None
@@ -2116,7 +2209,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
 
         async def resend(message: ChatMessage) -> ChatMessage:
             assert conversation.contact is not None
-            return await _with_restore(
+            return await _with_contact_add(
                 ctx, lambda: ctx.chat.resend_direct(conversation.contact, message)
             )
 
@@ -2125,7 +2218,7 @@ async def open_chat(ctx: AppContext, conversation: Conversation) -> int:
 
         async def resend_flood(message: ChatMessage) -> ChatMessage:
             assert conversation.contact is not None
-            return await _with_restore(
+            return await _with_contact_add(
                 ctx,
                 lambda: ctx.chat.resend_direct(conversation.contact, message, flood=True),
             )
@@ -2223,12 +2316,12 @@ async def _make_heard_tracker(
     return tracker, lambda hop: resolve(hop) or hop
 
 
-async def _with_restore(ctx: AppContext, attempt: Callable[[], Awaitable[Any]]) -> Any:
+async def _with_contact_add(ctx: AppContext, attempt: Callable[[], Awaitable[Any]]) -> Any:
     """Run a direct send. If the device forgot the contact, offer to restore it, then retry.
 
     This is the one rejection from which a send can recover: the firmware has no contact
     for the recipient (refer to :class:`~meshterm.core.connection.ContactNotOnDeviceError`),
-    and one write corrects it. The user is asked first (:func:`_restore_contact`). If the
+    and one write corrects it. The user is asked first (:func:`_add_contact_back`). If the
     user declines, the error is raised again. Thus the chat shows the refusal exactly as it
     shows each other failed send.
 
@@ -2247,12 +2340,12 @@ async def _with_restore(ctx: AppContext, attempt: Callable[[], Awaitable[Any]]) 
     try:
         return await attempt()
     except ContactNotOnDeviceError as missing:
-        if not await _restore_contact(ctx, missing):
+        if not await _add_contact_back(ctx, missing):
             raise
         return await attempt()
 
 
-async def _restore_contact(ctx: AppContext, missing: ContactNotOnDeviceError) -> bool:
+async def _add_contact_back(ctx: AppContext, missing: ContactNotOnDeviceError) -> bool:
     """Offer to write a forgotten contact back to the device. ``True`` if it now has it.
 
     A direct message is addressed through the contact entry of the *device*. Thus MeshTerm

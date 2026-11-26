@@ -36,14 +36,14 @@ screen is the node itself, in full:
 
     Last, the contact-management group, when the caller lets the page manage the contact
     (refer to :func:`open_node_detail`). It has ``Lock contact`` or ``Unlock contact``,
-    then ``Archive contact`` or ``Restore to device`` when they apply, then
+    then ``Archive contact`` or ``Unarchive contact`` when they apply, then
     ``Delete contact…``. ``Delete contact…`` is the last row, because it is the only
     action that cannot be undone. It is the single-contact counterpart of the bulk sweep
     of the Contacts list (refer to :mod:`~meshterm.ui.contacts_screen`), but it deletes
     where the sweep archives. After a red confirm, it removes this node from the contact
     table of the device and from the contacts that MeshTerm remembers for the device.
     Then the page closes, because the contact that the page shows does not exist any
-    more. An archive and a restore also close the page. A lock does not. A page that a
+    more. An archive and an unarchive also close the page. A lock does not. A page that a
     conversation opens has only the lock row of this group.
   * **Routes**: the routes on which the device really heard the node arrive. The shared
     route graph (:mod:`~meshterm.ui.pathgraph`) draws them from the node to our node, in
@@ -1379,10 +1379,19 @@ class ContactPages:
 
     The contacts come from the device one time, when the screen opens.
 
-    It is also the ^K key (``lock``) of a conversation: the lock of the author, which
-    :meth:`lock_state` reads and :meth:`set_locked` writes. The store keeps a lock under
-    the key of the device, so the pages hold that key too. The state is read from the store
-    at each paint and never kept here, because the node page can change it too.
+    It is also the ^K key of a conversation, which has **two verbs on one key**, because
+    the two states can never meet. On a live author ^K is the lock, which :meth:`lock_state`
+    reads and :meth:`set_locked` writes. On an **archived** author there is no lock to
+    toggle (a lock exists to keep a contact out of the archive), so ^K unarchives it
+    instead: :meth:`archived_author` finds it and :meth:`unarchive` writes it back to the
+    device. The store keeps both marks under the key of the device, so the pages hold that
+    key too. Each state is read from the store at each paint and never kept here, because
+    the node page can change it too.
+
+    The archived contacts are *not* in :meth:`find`, which answers for the contacts of the
+    device alone. A screen that wants one asks :meth:`archived_author` for it by name. Thus
+    a screen that knows nothing about the archive cannot get a contact that the radio
+    cannot address.
     """
 
     def __init__(self, ctx: AppContext, contacts: list[Contact], *, self_key: str = "") -> None:
@@ -1401,6 +1410,9 @@ class ContactPages:
         # The result of each key that find() got. A screen asks at each paint, and the
         # answer for one key does not change while the contacts stay the same.
         self._found: dict[str, Contact | None] = {}
+        # The archived records, read from the store at the first ask and not before. A
+        # conversation whose authors are all live never pays for the read.
+        self._archived: dict[str, Contact] | None = None
 
     @classmethod
     async def gather(cls, ctx: AppContext, *, self_key: str = "") -> ContactPages:
@@ -1430,9 +1442,18 @@ class ContactPages:
         return self._found[needle]
 
     @property
+    def _store_ready(self) -> bool:
+        """Whether the contact store can answer for this device: a store, and the key of it.
+
+        A lock and an archive mark are both kept there, under the key of the device. Thus
+        both verbs of ^K have the same condition, and it is written one time.
+        """
+        return getattr(self._ctx, "contact_store", None) is not None and bool(self._dev_pub)
+
+    @property
     def can_lock(self) -> bool:
         """Whether a lock can be written from here at all: a store, and the key of the device."""
-        return getattr(self._ctx, "contact_store", None) is not None and bool(self._dev_pub)
+        return self._store_ready
 
     def lock_state(self, contact: Contact | None) -> bool | None:
         """Whether ``contact`` is locked, or ``None`` when it cannot have a lock.
@@ -1463,11 +1484,82 @@ class ContactPages:
         if self.can_lock:
             self._ctx.contact_store.set_locked(self._dev_pub, contact, locked)
 
+    def archived_keys(self) -> frozenset[str]:
+        """The full keys of the contacts archived off this device, or none with no store.
+
+        A conversation compares it at each paint, to draw again the sender chips that gained
+        or lost the mark of the archive (refer to
+        :meth:`~meshterm.core.contact_store.ContactStore.archived_keys`).
+        """
+        if not self._store_ready:
+            return frozenset()
+        return self._ctx.contact_store.archived_keys(self._dev_pub)
+
+    def is_archived(self, key: str | None) -> bool:
+        """Whether ``key`` names a contact that a sweep took off the device.
+
+        A chat asks it for each sender chip that it draws, to put the ``💾`` of the archive
+        before the name (refer to :func:`~meshterm.ui.widgets.author_chip`). It reads the
+        state, not the records, so a key that the archive never had costs one set build and
+        no rebuilt contact.
+        """
+        if not key:
+            return False
+        needle = key.lower().removeprefix("0x")
+        return any(_same_key(stored, needle) for stored in self.archived_keys())
+
+    def archived_author(self, key: str | None) -> Contact | None:
+        """The **archived** contact with ``key`` (a full key or a key prefix), or ``None``.
+
+        It is :meth:`find` over the other half of the contacts of MeshTerm: the ones a sweep
+        took off the device and the store keeps in full. The key rule is the same, so a
+        stored key prefix finds the archived record that holds the full key.
+
+        The records are read from the store at the first ask. The *state* is not: a caller
+        that only wants to know whether a key is archived asks :meth:`archived_keys`, which
+        reads the store at each paint. Thus an unarchive that happens somewhere else (the
+        node page) shows here at the next frame.
+        """
+        if not key or not self._store_ready:
+            return None
+        if self._archived is None:
+            store = self._ctx.contact_store
+            self._archived = {
+                record.public_key: record.to_contact()
+                for record in store.archived(self._dev_pub)
+                if record.public_key
+            }
+        needle = key.lower().removeprefix("0x")
+        return next(
+            (c for c in self._archived.values() if _same_key(c.public_key, needle)),
+            None,
+        )
+
+    async def unarchive(self, contact: Contact) -> bool:
+        """Write an archived ``contact`` back to the device. ``True`` when it is live again.
+
+        This is the ^K verb of an archived author, and it is the same write as the
+        ``Unarchive contact`` row of the node page (refer to :func:`_unarchive_contact`).
+        A refused write reports itself in a dialog and changes nothing.
+
+        The pages hold the contact as live from here on, because the write to the device
+        succeeded. Thus the next paint gives it its padlock lane back and takes its ``💾``
+        away, and ^O opens its page, without a wait for the contacts of the device to be
+        read again.
+        """
+        if not await _unarchive_contact(self._ctx, contact, self._self_key, contact.name):
+            return False
+        self._contacts = [*self._contacts, contact]
+        if self._archived is not None:
+            self._archived.pop(contact.public_key, None)
+        self._found.clear()
+        return True
+
     async def show(self, contact: Contact | None) -> None:
         """Open the node page of ``contact``, or of our node when it is ``None``.
 
         The page opens to look, not to manage (``manage=False``). The verbs that remove a
-        contact (archive, restore, delete) belong to the list that the contact is in, and a
+        contact (archive, unarchive, delete) belong to the list that the contact is in, and a
         conversation is not that list. The lock is the exception (``lock=True``): it removes
         nothing, and a conversation can already toggle it with ^K (JP, 2026-10-19).
         """
@@ -1494,9 +1586,9 @@ async def open_node_detail(
 
     **Three actions end the loop instead of a return to it**, because after each of them,
     the page describes a state that is not true now. These actions archive the contact off
-    the device, restore it, and delete it permanently. All three are *contact management*.
+    the device, unarchive it, and delete it permanently. All three are *contact management*.
     They are the last group on the Info tab, and the page shows only the ones that apply.
-    The user can archive or delete a live contact, and restore or delete an archived
+    The user can archive or delete a live contact, and unarchive or delete an archived
     contact.
 
     **A lock is management that stays.** The user can lock a live contact against an
@@ -1526,14 +1618,14 @@ async def open_node_detail(
             node`` section of the main menu. If one of them changes what the page shows
             (Device config can change the name or the location), the page opens again with
             the new values.
-        manage: Whether to show the contact-management actions (lock, archive, restore,
+        manage: Whether to show the contact-management actions (lock, archive, unarchive,
             delete). ``False`` draws none of them, and then the page can only return
             ``False``.
         lock: Whether to show ``Lock contact`` or ``Unlock contact``. ``None`` follows
             ``manage``.
 
     Returns:
-        ``True`` if the visit ended because the user archived, restored, or deleted the
+        ``True`` if the visit ended because the user archived, unarchived, or deleted the
         contact. This tells the caller to read and build again the list that it came from.
         ``False`` on each ordinary exit.
 
@@ -2074,12 +2166,12 @@ async def open_node_detail(
                     screen.replace_info_row(
                         "posts", Text("asked again — the room sends what it still has", "ok")
                     )
-            elif action == "restore":
-                # A restore writes the contact back, and it ends the visit for the same reason
+            elif action == "unarchive":
+                # An unarchive writes the contact back, and it ends the visit for the same reason
                 # as a delete. The page was opened from the Archived list, and the row that
                 # it was opened from will not be in that list any more.
                 assert contact is not None  # the row exists only for a real contact
-                if await _restore_archived(ctx, contact, self_key, label):
+                if await _unarchive_contact(ctx, contact, self_key, label):
                     contact_removed = True
                     break
             elif action in ("lock", "unlock"):
@@ -2175,7 +2267,7 @@ def _management_rows(
     The lock is first. It changes nothing on the device and ends nothing, so it is the
     safest row of the group for the highlight. Then the constructive verb, then the
     destructive verb. Thus a key press by mistake most probably goes to the row that the
-    user can undo. Archive and restore are the two halves of one move that the user can
+    user can undo. Archive and unarchive are the two halves of one move that the user can
     reverse. They use the ``💾``/``📂`` pair that the lexicon already gives to "put away"
     and "bring back". Only a contact with a full key can be written back to the device.
     Thus a contact with only a key prefix never gets the archive, because the archive
@@ -2188,8 +2280,8 @@ def _management_rows(
     Args:
         locked: Whether the contact is locked now.
         lockable: Whether the page shows the lock row.
-        manageable: Whether the page shows archive, restore, and delete.
-        archived: Whether the contact is archived. Then restore takes the place of archive.
+        manageable: Whether the page shows archive, unarchive, and delete.
+        archived: Whether the contact is archived. Then unarchive takes the place of archive.
         whole_key: Whether the full key of the contact is known, which an archive must have.
     """
     rows: list[_Action] = []
@@ -2201,7 +2293,7 @@ def _management_rows(
     if not manageable:
         return rows
     if archived:
-        rows.append(_Action("restore", "📂", "ok", "Restore to device"))
+        rows.append(_Action("unarchive", "📂", "ok", "Unarchive contact"))
     elif whole_key and not locked:
         rows.append(_Action("archive", "💾", "", "Archive contact"))
     rows.append(_Action("remove", "🗑", "err", "Delete contact…"))
@@ -2235,7 +2327,7 @@ async def _archive_contact(ctx: AppContext, contact: Contact, self_key: str, lab
     The confirm is **amber, not red, and it asks for no typed text**. The two caution tiers,
     one above the other, are for two different costs, and this cost is recoverable. The
     contact keeps its key, its reception history, and its transcripts. The Archived list is
-    one row away on the Contacts screen, and a restore is one write. Red and a typed word
+    one row away on the Contacts screen, and an unarchive is one write. Red and a typed word
     are for :func:`_remove_contact`, which is the action that cannot be undone.
 
     Args:
@@ -2276,8 +2368,8 @@ async def _archive_contact(ctx: AppContext, contact: Contact, self_key: str, lab
     )
     prompt.append(
         "? It comes off this device's contact list, freeing a slot for a new one. MeshTerm "
-        "keeps it — with its key, reception history, and messages — and you can restore it "
-        "at any time.",
+        "keeps it — with its key, reception history, and messages — and you can unarchive "
+        "it at any time.",
         style="warn",
     )
     if not await ctx.ui.dialog(
@@ -2311,16 +2403,16 @@ async def _archive_contact(ctx: AppContext, contact: Contact, self_key: str, lab
     return True
 
 
-async def _restore_archived(ctx: AppContext, contact: Contact, self_key: str, label: str) -> bool:
+async def _unarchive_contact(ctx: AppContext, contact: Contact, self_key: str, label: str) -> bool:
     """Write an archived contact back to the device. ``True`` when it is live again.
 
     This is the inverse of the Contacts sweep, for one contact at a time (refer to
     :mod:`~meshterm.ui.sweep_screen`). The device write comes **first**, and the archive
     mark in the store is cleared only after the write succeeded. A failed write must never
     leave a contact listed as live on a device that does not have it. That row is a contact
-    that the user cannot send a message to and cannot restore.
+    that the user cannot send a message to and cannot unarchive.
 
-    No confirm: a restore is constructive, the sweep that archived the contact can reverse
+    No confirm: an unarchive is constructive, the sweep that archived the contact can reverse
     it, and it uses one contact slot. The dialog stays for the failures. They are the only
     part that the user cannot see from the list when the list comes back with the row in it.
 
@@ -2343,16 +2435,16 @@ async def _restore_archived(ctx: AppContext, contact: Contact, self_key: str, la
     try:
         await device.add_contact(contact)
     except Exception as exc:  # noqa: BLE001 - a refused write is reported, not raised
-        ctx.log.debug("contacts: restore failed for %s: %s", contact.name, exc)
+        ctx.log.debug("contacts: unarchive failed for %s: %s", contact.name, exc)
         await session.message_dialog(
-            Text(f"✗ couldn't restore {label} — {exc}", style="err"),
-            title="Restore contact",
+            Text(f"✗ couldn't unarchive {label} — {exc}", style="err"),
+            title="Unarchive contact",
         )
         return False
 
     dev_pub = (self_key or "").lower().removeprefix("0x")
     if ctx.contact_store is not None and dev_pub and contact.public_key:
-        ctx.contact_store.restore(dev_pub, contact.public_key)
+        ctx.contact_store.unarchive(dev_pub, contact.public_key)
     ctx.devstate.invalidate_contacts()
     return True
 
@@ -2373,7 +2465,7 @@ async def _remove_contact(ctx: AppContext, contact: Contact, self_key: str, labe
     the chat messages with it all belong to MeshTerm, and they do not change. What is lost
     is the ability of the device to address the node. Thus, when a chat sends to a contact
     that the firmware does not have now, it offers to write the contact back and does not
-    fail (refer to :func:`~meshterm.ui.chat._restore_contact`).
+    fail (refer to :func:`~meshterm.ui.chat._add_contact_back`).
 
     **It cannot be undone, and the confirm says so.** Nothing here can derive again a key
     that the store forgot. Thus this is the only contact action with no way back, and that
@@ -2403,7 +2495,7 @@ async def _remove_contact(ctx: AppContext, contact: Contact, self_key: str, labe
 
     if not await ctx.ui.dialog(
         f"Delete {label} for good? Its key is forgotten by both this device and MeshTerm, "
-        "so it can't be messaged or restored — only heard again. To free the device slot "
+        "so it can't be messaged or unarchived — only heard again. To free the device slot "
         "and keep the contact, archive it instead.",
         [("Cancel", False), ("Delete", True)],
         title="Delete contact",

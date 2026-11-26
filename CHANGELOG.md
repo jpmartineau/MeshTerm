@@ -11,6 +11,26 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **A chat says which of its senders is archived, and ^K brings one back.** A sweep takes a
+  contact off the device and MeshTerm keeps the whole record, but the radio can no longer
+  address that node. Until now a conversation gave no sign of it: the sender looked exactly
+  like a live contact. Its chip now carries `💾` before the name, in the place where a locked
+  contact carries its padlock. The two marks never meet, because only a live contact can be
+  locked. Select such a message and press ^K: the contact goes back on the device, the mark
+  goes away, and the key is the lock again. A full contact table is the one thing that can
+  refuse the write, and it says so. ^O opens the node page of an archived author too, which
+  it could not do before.
+
+### Changed
+
+- **One word for the reverse of an archive: unarchive.** The node page row reads
+  `Unarchive contact` under `Archive contact`, and the Archived contacts list, the sweep
+  confirm, and the delete confirm say the same word. It was "restore", which MeshTerm also
+  says about settings, channels, device routes, and the map, so the word said less each
+  time it was used.
+
 ## [1.0.0] - 2026-11-23
 
 **MeshTerm reaches 1.0.** The command line, its `--json` answers, the configuration keys,

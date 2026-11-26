@@ -1480,7 +1480,7 @@ def test_a_page_that_may_only_lock_shows_only_the_lock_row() -> None:
     assert keys(lockable=False) == []
     assert keys(manageable=True) == ["lock", "archive", "remove"]
     assert keys(manageable=True, locked=True) == ["unlock", "remove"]
-    assert keys(manageable=True, lockable=False, archived=True) == ["restore", "remove"]
+    assert keys(manageable=True, lockable=False, archived=True) == ["unarchive", "remove"]
 
 
 async def test_a_conversation_opens_the_author_page_with_its_lock_row(monkeypatch) -> None:  # noqa: ANN001

@@ -155,10 +155,10 @@ async def test_adding_a_forgotten_contact_back_makes_it_messageable() -> None:
     await device.disconnect()
 
 
-async def test_restore_contact_writes_only_when_the_dialog_is_accepted() -> None:
+async def test_add_contact_back_writes_only_when_the_dialog_is_accepted() -> None:
     """The device write is offered, not silent. If the user declines, the table does not change."""
     from meshterm.core.connection import ContactNotOnDeviceError
-    from meshterm.ui.chat import _restore_contact
+    from meshterm.ui.chat import _add_contact_back
 
     class _Ui:
         def __init__(self, answer: bool) -> None:
@@ -193,13 +193,13 @@ async def test_restore_contact_writes_only_when_the_dialog_is_accepted() -> None
     before = len(await device.get_contacts())
 
     declined = _Ctx(device, answer=False)
-    assert await _restore_contact(declined, missing) is False
+    assert await _add_contact_back(declined, missing) is False
     assert len(await device.get_contacts()) == before
     assert declined.devstate.invalidated == 0
     assert "bob_caribou" in declined.ui.prompt
 
     accepted = _Ctx(device, answer=True)
-    assert await _restore_contact(accepted, missing) is True
+    assert await _add_contact_back(accepted, missing) is True
     assert len(await device.get_contacts()) == before + 1
     assert accepted.devstate.invalidated == 1
     await device.disconnect()
@@ -208,7 +208,7 @@ async def test_restore_contact_writes_only_when_the_dialog_is_accepted() -> None
 async def test_a_declined_restore_lets_the_rejection_stand() -> None:
     """The send tries again if the contact is back. If not, the send reports the refusal."""
     from meshterm.core.connection import ContactNotOnDeviceError
-    from meshterm.ui.chat import _with_restore
+    from meshterm.ui.chat import _with_contact_add
 
     stranger = Contact(name="bob_caribou", public_key="a3" * 32)
     tries = 0
@@ -229,17 +229,17 @@ async def test_a_declined_restore_lets_the_rejection_stand() -> None:
 
     import meshterm.ui.chat as chat_module
 
-    original = chat_module._restore_contact
-    chat_module._restore_contact = restore
+    original = chat_module._add_contact_back
+    chat_module._add_contact_back = restore
     try:
         with pytest.raises(ContactNotOnDeviceError):
-            await _with_restore(_Ctx(restored=False), attempt)
+            await _with_contact_add(_Ctx(restored=False), attempt)
         assert tries == 1  # declined: no second transmission
         tries = 0
-        assert await _with_restore(_Ctx(restored=True), attempt) == "sent"
+        assert await _with_contact_add(_Ctx(restored=True), attempt) == "sent"
         assert tries == 2  # the same send runs again after the contact is written back
     finally:
-        chat_module._restore_contact = original
+        chat_module._add_contact_back = original
 
 
 def test_a_rejected_command_is_explained_in_words_not_wire_codes() -> None:
@@ -3784,6 +3784,123 @@ def test_a_locked_author_has_the_padlock_on_its_sender_chip(
     pages.set_locked(alice, False)  # type: ignore[attr-defined]
     shown = _strip_ansi(screen.render_body(60))
     assert "\U0001f512" not in shown and "Alice" in shown
+
+
+@pytest.mark.parametrize("chips", [True, False])
+def test_an_archived_author_wears_the_archive_mark_on_its_sender_chip(
+    tmp_path: Path,
+    powerline,  # noqa: ANN001
+    chips: bool,
+) -> None:
+    """An archived contact reads the archive mark before its name on its chip (JP, 2026-11-25).
+
+    A sweep took the contact off the device, so the radio cannot address it, and the chip is
+    the only place in a transcript that can say so. The mark is in the label, so arrow mode
+    has it too. It stands where a padlock stands on a live contact, and the two never meet: a
+    lock exists to keep a contact out of the archive. An unarchive somewhere else (the node
+    page) takes the mark away with no key press in the chat, because the cache of the
+    transcript compares the archived keys as it compares the locks.
+    """
+    from meshterm.core.contact_store import ContactStore
+    from tests.conftest import recording_pages
+
+    powerline(chips)
+    store = ContactStore(tmp_path / "contacts.json")
+    dev = "cc" * 32
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+    store.archive(dev, alice, when=1_700_000_000)
+    # The sweep took Alice off the device, so the contacts of the pages do not have her.
+    pages = recording_pages([], store=store, self_key=dev)
+    keys = {"alice": "a1" * 32, "bob": "b2" * 32}
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [
+            ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0),
+            ChatMessage(text="Bob: yo", is_channel=True, channel_idx=0),
+        ],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: keys.get(name.casefold()),
+        pages=pages,  # type: ignore[arg-type]
+    )
+    shown = _strip_ansi(screen.render_body(60))
+    assert "\U0001f4be Alice" in shown
+    assert "\U0001f512" not in shown  # an archived contact has no lock to show
+    assert "\U0001f4be Bob" not in shown  # Bob was never a contact of this device
+
+    store.unarchive(dev, alice.public_key)
+    shown = _strip_ansi(screen.render_body(60))
+    assert "\U0001f4be" not in shown and "Alice" in shown
+
+    # The handhelds draw no emoji, so the mark folds to the one glyph of their font. It is
+    # the same glyph as the backup icon, because the archive is where a contact is kept.
+    from meshterm.platforms import PICOCALC_LYRA, set_platform
+
+    store.archive(dev, alice, when=1_700_000_000)
+    set_platform(PICOCALC_LYRA)
+    screen._render_cache = None  # the platform is not part of the cache key
+    assert "⌂ Alice" in _strip_ansi(screen.render_body(53))
+
+
+async def test_ctrl_k_unarchives_the_author_that_it_cannot_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """^K on an archived author writes the contact back to the device (JP, 2026-11-25).
+
+    The key has two verbs, and the state of the author decides which one it has. There is no
+    lock to turn on an archived contact, so the hint reads ``^K unarchive``, the lane chip
+    reads ``Unarch``, and the press puts the contact back. Then the same key locks it, as it
+    does for each other author.
+    """
+    from meshterm.core.contact_store import ContactStore
+    from meshterm.ui import node_detail_screen
+    from tests.conftest import recording_pages
+
+    store = ContactStore(tmp_path / "contacts.json")
+    dev = "cc" * 32
+    alice = Contact(name="Alice", public_key="a1" * 32, key_prefix="a1" * 6)
+    store.archive(dev, alice, when=1_700_000_000)
+    pages = recording_pages([], store=store, self_key=dev)
+
+    written: list[str] = []
+
+    async def fake_write(ctx, contact, self_key, label):  # noqa: ANN001, ANN202
+        """Stand in for the write to the device, and do the store half that follows it."""
+        written.append(contact.public_key)
+        store.unarchive(dev, contact.public_key)
+        return True
+
+    monkeypatch.setattr(node_detail_screen, "_unarchive_contact", fake_write)
+    screen = ChatScreen(
+        Conversation(label="#public", is_channel=True, channel_idx=0),
+        [ChatMessage(text="Alice: hi", is_channel=True, channel_idx=0)],
+        send=None,
+        names={},
+        session=_StubSession(),
+        key_of=lambda name: "a1" * 32,
+        pages=pages,  # type: ignore[arg-type]
+    )
+    screen.handle("up")  # select the message of Alice
+
+    assert "^K unarchive" in screen.footer_hint
+    lane = screen.picocalc_lyra_lane
+    assert (lane[1].opp_label, lane[1].opp_action, lane[1].opp_enabled) == ("Unarch", "lock", True)
+    assert fkeys.PICOCALC_LYRA_DECK.action_for(lane, 7) == "lock"
+
+    screen.handle("lock")
+    await asyncio.sleep(0)  # the flow runs detached, as the node page does
+    assert written == ["a1" * 32]
+    assert "Unarchived Alice" in screen._status
+    assert store.archived_keys(dev) == frozenset()
+    assert "\U0001f4be" not in _strip_ansi(screen.render_body(60))
+
+    # Alice is a live contact now, so the key is the lock again.
+    assert "^K lock" in screen.footer_hint
+    assert screen.picocalc_lyra_lane[1].opp_label == "Lock"
+    screen.handle("lock")
+    assert store.is_locked(dev, alice.public_key)
 
 
 @pytest.mark.parametrize("chips", [True, False])

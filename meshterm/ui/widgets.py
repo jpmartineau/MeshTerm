@@ -45,6 +45,7 @@ from ..core.models import (
 )
 from ..platforms import Platform, on_platform
 from .marks import (
+    ARCHIVED_ICON,
     DST_NODE,
     LOCK_ICON,
     NODE_MARK,
@@ -714,7 +715,14 @@ def name_chip(
     return hop_chip(hop, role=role)
 
 
-def author_chip(name: str, key: str | None, *, locked: bool = False, picked: bool = False) -> Text:
+def author_chip(
+    name: str,
+    key: str | None,
+    *,
+    locked: bool = False,
+    archived: bool = False,
+    picked: bool = False,
+) -> Text:
     """The author of a message in a chat: the chip of the node, which closes on the point.
 
     It is :func:`name_chip` with the role of an origin, and one difference: a node that no
@@ -727,17 +735,26 @@ def author_chip(name: str, key: str | None, *, locked: bool = False, picked: boo
     :func:`self_chip`), and the same padlock as the row of the contact in the Contacts list
     (:data:`~meshterm.ui.marks.LOCK_ICON`, ``⚿`` on the PicoCalc).
 
+    An **archived** contact has the ``💾`` of the archive in that same place
+    (:data:`~meshterm.ui.marks.ARCHIVED_ICON`, JP, 2026-11-25). The radio cannot address
+    such a node, and the chip is the only place in a transcript that can say so. The two
+    marks never compete for the place, because only a live contact can have a lock (refer
+    to :meth:`~meshterm.ui.node_detail_screen.ContactPages.lock_state`). An archived mark
+    wins if a caller asks for both.
+
     Args:
         name: The name as it must read.
         key: Any known prefix of the key of the node, or ``None``.
         locked: Whether the author is a contact that is locked against the archive sweep.
+        archived: Whether the author is a contact that a sweep took off the device.
         picked: Whether the selected message of the chat is in the group of this chip.
             Then the label is white (refer to :func:`picked_hop`).
 
     Returns:
         The chip as a one-line :class:`Text`.
     """
-    label = f"{glyph(LOCK_ICON)} {name}" if locked else name
+    mark = ARCHIVED_ICON if archived else LOCK_ICON if locked else ""
+    label = f"{glyph(mark)} {name}" if mark else name
     hop = PathHop(label, key=key or None, quiet=True)
     return hop_chip(picked_hop(hop) if picked else hop, role=ORIGIN)
 

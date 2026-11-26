@@ -36,7 +36,7 @@ An archive keeps all the data except the device row: the full reception history 
 (not changed, because it is in the SQLite database, not here), its direct-message transcript
 (stored under the key prefix, not under a contact row), and its full public key.
 The full key is exactly what :meth:`~meshterm.core.connection.Device.add_contact` must have
-to put the contact back. Thus a restore is one write. The chat screen already does this write
+to put the contact back. Thus an unarchive is one write. The chat screen already does this write
 when the device rejects a send to an unknown recipient (refer to
 :class:`~meshterm.core.connection.ContactNotOnDeviceError`).
 
@@ -49,7 +49,7 @@ statement of MeshTerm about the contact, kept next to the other statement that M
 
 Be careful with a radio bridge without firmware. Its contact table is only in RAM, and for
 this bridge, this store is the memory. An archive there removes the contact from the lists
-completely, and only a restore brings it back.
+completely, and only an unarchive brings it back.
 
 This store is global machine state in a small JSON file (``<config_dir>/contacts.json``), the
 same as the other user state (mutes, remembered channels, saved settings). It is not in the
@@ -292,7 +292,7 @@ class ContactStore:
         """
         dev = _norm(device_pubkey)
         if not dev or not contact.public_key:
-            return  # no key to address it: nothing to restore it by
+            return  # no key to address it: nothing to unarchive it by
         entry = replace(RememberedContact.from_contact(contact), archived_at=int(when))
         current = dict(self._state.get(dev, {}))
         if current.get(entry.public_key) == entry:
@@ -301,7 +301,19 @@ class ContactStore:
         self._state[dev] = current
         self._save()
 
-    def restore(self, device_pubkey: str, contact_pubkey: str) -> RememberedContact | None:
+    def archived_keys(self, device_pubkey: str) -> frozenset[str]:
+        """The full keys (lowercase hex) of all the archived contacts on this device.
+
+        A chat compares it at each paint, to draw again the sender chips that gained or lost
+        the mark of the archive (refer to :class:`~meshterm.ui.chat.ChatScreen`). It is the
+        same shape as :meth:`locked_keys`, and for the same reason: a set of keys is cheap
+        to build and cheap to compare, where the sorted records of :meth:`archived` are
+        neither.
+        """
+        remembered = self._state.get(_norm(device_pubkey), {}).values()
+        return frozenset(c.public_key for c in remembered if c.archived)
+
+    def unarchive(self, device_pubkey: str, contact_pubkey: str) -> RememberedContact | None:
         """Clear the archived mark of one contact, and return the archived record.
 
         This is only the store part. The caller writes the contact back to the device (refer

@@ -701,7 +701,7 @@ async def _add_public_channel(ctx: AppContext) -> Conversation | None:
     The Chat picker calls this function for its Public offer (``on_device=False``, refer to
     :func:`_channels_from_slots`). The function asks first and does not write silently,
     because the write changes what the device stores. The precedent is the contact that is
-    not on the device (refer to :func:`meshterm.ui.chat._restore_contact`).
+    not on the device (refer to :func:`meshterm.ui.chat._add_contact_back`).
 
     The slot comes from :func:`~meshterm.ui.channels._pick_free_slot`, which the channel
     manager uses for each add. Thus the capacity of the device sets the slot, and the slot
