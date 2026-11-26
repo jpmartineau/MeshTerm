@@ -86,6 +86,7 @@ of the Cardputer Zero.
   by default), and a flash of the title for a notification that plays no sound. The
   PicoCalc has no sound, so there each notification flashes. The idea came from the
   MeshTerm Discord.
+  ([#41](https://github.com/jpmartineau/MeshTerm/issues/41))
 
 - **MeshTerm drives the older LoRa Cap of the Cardputer Zero.** M5Stack made two LoRa
   Caps. The newer Cap LoRa-1262 has an antenna switch, and a small chip that turns the
