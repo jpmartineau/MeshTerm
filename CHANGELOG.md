@@ -11,6 +11,8 @@ version.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-25
+
 ### Added
 
 - **A chat says which of its senders is archived, and ^K brings one back.** A sweep takes a
@@ -1040,7 +1042,8 @@ commands.
 MeshTerm is free and open source, under the Apache 2.0 licence. The licence does not cover
 the name and the logo (refer to `NOTICE`). A fork is welcome under its own name.
 
-[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jpmartineau/MeshTerm/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/jpmartineau/MeshTerm/releases/tag/v1.0.1
 [1.0.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v1.0.0
 [0.13.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.13.0
 [0.12.0]: https://github.com/jpmartineau/MeshTerm/releases/tag/v0.12.0

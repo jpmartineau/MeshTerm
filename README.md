@@ -27,7 +27,7 @@ run MeshTerm, the more the history of your mesh is worth.
 > change something, first say hello on [Discord](https://discord.gg/AZwe5Uvb3S).
 > [Read more about how the project is run](#how-this-project-is-run).
 
-https://github.com/user-attachments/assets/4f918f68-6302-43c8-8d44-df8ad29b5bd3
+https://github.com/user-attachments/assets/33d429f9-9838-4a84-800c-8f6a2d364745
 
 <p align="center"><sub>A video of less than two minutes, in the demo mesh over Montréal (<code>meshterm --demo</code>).</sub></p>
 
